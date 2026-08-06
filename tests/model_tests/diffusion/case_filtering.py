@@ -29,7 +29,12 @@ from vllm_omni.platforms import current_omni_platform
 MAX_CI_DEVICES = 4
 
 
-def get_test_group_marks(model_name: str, test_group: list[DiffusionAccs] | None, model_marks: list | None) -> list:
+def get_test_group_marks(
+    model_name: str,
+    test_group: list[DiffusionAccs] | None,
+    model_marks: list | None,
+    model_type_marker: str = "diffusion",
+) -> list:
     """Build the full set of pytest marks for a test group.
 
     For now, single device groups default to core model, and multi device groups
@@ -37,6 +42,7 @@ def get_test_group_marks(model_name: str, test_group: list[DiffusionAccs] | None
     the max number of GPUs for the CI to prevent accidentally adding configurations that
     would be skipped in the CI."""
     marks = list(model_marks) if model_marks is not None else []
+    marks.append(getattr(pytest.mark, model_type_marker))
 
     required_devices = get_required_device_count(test_group)
     if required_devices > MAX_CI_DEVICES:
@@ -77,7 +83,10 @@ def get_model_parametrization(model_name: str, test_info: DiffusionModelTestOpts
             test_info.check_multi_output and test_group is None,
             test_info.check_determinism and test_group is None,
             id=f"{model_name}[{'+'.join(test_group)}]" if test_group else model_name,
-            marks=get_test_group_marks(model_name, test_group, test_info.marks),
+            marks=get_test_group_marks(
+                model_name, test_group, test_info.marks,
+                model_type_marker=test_info.model_type_marker,
+            ),
         )
         for test_group in test_groups
     ]

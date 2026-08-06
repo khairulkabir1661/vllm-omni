@@ -26,10 +26,7 @@ from tests.model_tests.diffusion.task_runners import (
     run_and_validate_online_text_to_video_request,
 )
 
-# NOTE : Hardware marks are added dynamically based on test requirements
-pytestmark = [pytest.mark.diffusion, pytest.mark.xdist]
-
-
+# NOTE: Hardware and model type marks are added dynamically based on test requirements and model type
 @pytest.mark.parametrize(
     "model_name,accelerations,supported_tasks,check_multioutput,check_determinism",
     get_parametrized_options(DIFFUSION_TEST_SETTINGS, online=True),

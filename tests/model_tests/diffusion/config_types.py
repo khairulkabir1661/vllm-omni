@@ -76,6 +76,10 @@ class DiffusionModelTestOpts(NamedTuple):
     check_multi_output: bool = True  # Runs multiple generations in one request
     check_determinism: bool = True  # Runs 2 generations with the same seed and check determinism
 
+    # Function module marker applied per-test-case via parametrization.
+    # Override to "omni" or "tts" for non-diffusion models.
+    model_type_marker: str = "diffusion"
+
 
 ### Mappings & utils for building offline Omni() instances given a list of enabled accelerations
 ACC_OMNI_KWARGS = {
