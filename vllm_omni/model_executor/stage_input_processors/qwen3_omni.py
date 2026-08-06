@@ -32,9 +32,9 @@ from vllm_omni.model_executor.stage_input_processors.tts_utils import (
 
 logger = logging.getLogger(__name__)
 
-# Pooling output layer keys: "0" = word embedding, "24" = accept_hidden_layer
+# Pooling output layer keys: "0" = word embedding; hidden layer read from config
 _EMBED_LAYER_KEY = "0"
-_HIDDEN_LAYER_KEY = "24"
+_DEFAULT_HIDDEN_LAYER_KEY = "24"
 # Per-model REPLACE-keys for the full-payload accumulator.  Keys in this
 # set use REPLACE semantics (subsequent emissions discard prior chunks)
 # instead of CONCAT.  qwen3-omni currently has none — model_outputs is
@@ -56,6 +56,16 @@ def _layer_tensor(layers: dict[Any, Any], key: str) -> torch.Tensor | None:
     if val is None:
         val = layers.get(key)
     return val if isinstance(val, torch.Tensor) else None
+
+
+def _get_hidden_layer_key(transfer_manager: Any) -> str:
+    """Read ``accept_hidden_layer`` from model config via *transfer_manager*."""
+    try:
+        mc = transfer_manager._get_model_config()
+        val = mc.hf_config.talker_config.accept_hidden_layer
+        return str(int(val))
+    except (AttributeError, TypeError, ValueError):
+        return _DEFAULT_HIDDEN_LAYER_KEY
 
 
 def _compute_talker_prompt_ids_length(info: OmniPayload, device: torch.device | str = "cuda") -> int:
@@ -199,6 +209,7 @@ def _merge_pd_embeddings(
     prefill_mm: dict[str, Any],
     device: torch.device,
     expected_total: int | None = None,
+    hidden_layer_key: str = _DEFAULT_HIDDEN_LAYER_KEY,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Merge prefill prompt embeddings with decode generated embeddings.
 
@@ -213,7 +224,7 @@ def _merge_pd_embeddings(
     try:
         p_layers = prefill_mm.get("hidden_states", {}).get("layers", {})
         p_emb = p_layers[int(_EMBED_LAYER_KEY)].detach().to(device=device, dtype=torch.float)
-        p_hid = p_layers[int(_HIDDEN_LAYER_KEY)].detach().to(device=device, dtype=torch.float)
+        p_hid = p_layers[int(hidden_layer_key)].detach().to(device=device, dtype=torch.float)
     except (KeyError, AttributeError, TypeError) as exc:
         available_keys = list(prefill_mm.keys()) if isinstance(prefill_mm, Mapping) else type(prefill_mm).__name__
         logger.error(
@@ -222,7 +233,7 @@ def _merge_pd_embeddings(
             "Falling back to decode-only embeddings – talker user-segment will be degraded.",
             exc,
             _EMBED_LAYER_KEY,
-            _HIDDEN_LAYER_KEY,
+            hidden_layer_key,
             available_keys,
         )
         return decode_emb, decode_hid
@@ -454,8 +465,9 @@ def thinker2talker_async_chunk(
     thinker_layers = thinker_hs.get("layers", {}) if isinstance(thinker_hs, dict) else {}
     thinker_embed_raw = multimodal_output.get("embed", {})
     thinker_embed = thinker_embed_raw if isinstance(thinker_embed_raw, dict) else {}
+    hidden_layer_key = _get_hidden_layer_key(transfer_manager)
     thinker_emb = _layer_tensor(thinker_layers, _EMBED_LAYER_KEY)
-    thinker_hid = _layer_tensor(thinker_layers, _HIDDEN_LAYER_KEY)
+    thinker_hid = _layer_tensor(thinker_layers, hidden_layer_key)
     if thinker_emb is None or thinker_hid is None:
         logger.debug(
             "thinker2talker_async_chunk: missing thinker layers for req=%s (embed=%s hidden=%s)",
@@ -542,12 +554,16 @@ def thinker2talker_full_payload(
         )
         return None
 
+    hidden_layer_key = _get_hidden_layer_key(transfer_manager)
+    hidden_layer_int = int(hidden_layer_key)
     layers = {
         0: pooling_output.get("hidden_states.layer_0"),
-        24: pooling_output.get("hidden_states.layer_24"),
+        hidden_layer_int: pooling_output.get(
+            f"hidden_states.layer_{hidden_layer_int}"
+        ),
     }
     thinker_emb = _layer_tensor(layers, _EMBED_LAYER_KEY)
-    thinker_hid = _layer_tensor(layers, _HIDDEN_LAYER_KEY)
+    thinker_hid = _layer_tensor(layers, hidden_layer_key)
     if thinker_emb is None:
         hidden = pooling_output.get("hidden")
         thinker_emb = hidden if isinstance(hidden, torch.Tensor) else None
