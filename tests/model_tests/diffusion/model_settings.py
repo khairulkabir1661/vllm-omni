@@ -52,3 +52,11 @@ DIFFUSION_TEST_SETTINGS = {
         ],
     ),
 }
+
+# Unified settings dict for all model types. Consumers that need to resolve
+# any model (not just diffusion) should use this instead of
+# DIFFUSION_TEST_SETTINGS.  test_alignment.py intentionally keeps using
+# DIFFUSION_TEST_SETTINGS because it validates diffusion registry alignment.
+MODEL_SETTINGS: dict[str, DiffusionModelTestOpts] = {
+    **DIFFUSION_TEST_SETTINGS,
+}

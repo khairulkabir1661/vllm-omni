@@ -56,6 +56,16 @@ from vllm_omni.platforms import current_omni_platform
 
 logger = init_logger(__name__)
 
+_MODEL_TYPE_MARKERS = ("diffusion", "omni", "tts")
+
+
+def _has_model_type_marker(request) -> bool:
+    """Check whether the test node carries any known model-type marker."""
+    return any(
+        request.node.get_closest_marker(m) is not None
+        for m in _MODEL_TYPE_MARKERS
+    )
+
 
 def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
     # Reset environment variable cache
@@ -3111,7 +3121,7 @@ def iter_omni_server(
         # be ideal to cleanup consistently everywhere.
         original_model = model_prefix + params.model
         model = original_model
-        if run_level == "core_model" and request.node.get_closest_marker("diffusion"):
+        if run_level == "core_model" and _has_model_type_marker(request):
             model = resolve_tiny_model_path(model)
         port = params.port
         stage_config_path = stage_config_path_for_run_level(params.stage_config_path, run_level)
@@ -3202,7 +3212,7 @@ def iter_omni_runner(
             extra_omni_kwargs = dict(extra) if extra is not None else {}
         stage_config_path = stage_config_path_for_run_level(stage_config_path, run_level)
         model = model_prefix + model
-        if run_level == "core_model" and request.node.get_closest_marker("diffusion"):
+        if run_level == "core_model" and _has_model_type_marker(request):
             model = resolve_tiny_model_path(model)
         with OmniRunner(model, seed=42, stage_configs_path=stage_config_path, **extra_omni_kwargs) as runner:
             print("OmniRunner started successfully")
