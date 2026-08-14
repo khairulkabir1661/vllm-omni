@@ -16,15 +16,19 @@ from vllm.entrypoints.openai.chat_completion.protocol import (
 )
 from vllm.entrypoints.openai.engine.protocol import (
     ErrorResponse,
+    RequestResponseMetadata,
     UsageInfo,
 )
 from vllm.logger import init_logger
+from vllm.tokenizers import TokenizerLike
 from vllm.tokenizers.mistral import (
     MistralTokenizer,
     maybe_serialize_tool_calls,
     truncate_tool_call_ids,
     validate_request_params,
 )
+
+from vllm.utils.async_utils import merge_async_iterators
 
 from vllm_omni.entrypoints.openai.serving_chat import OmniOpenAIServingChat
 from vllm_omni.entrypoints.openai.utils import is_single_stage_diffusion
@@ -216,6 +220,156 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
             all_engine_prompts.append(engine_prompts[0])
 
         return all_conversations, all_engine_prompts, single_requests
+
+    async def chat_completion_full_generator_batch(
+        self,
+        request: BatchChatCompletionRequest,
+        generators: list[Any],
+        request_id: str,
+        model_name: str,
+        all_conversations: list[Any],
+        tokenizer: TokenizerLike,
+        request_metadata: RequestResponseMetadata,
+        reasoning_parser: Any = None,
+    ) -> ErrorResponse | ChatCompletionResponse:
+        """Collect results from N generators and build one response.
+
+        Uses ``merge_async_iterators`` to fan out N generators (one per
+        conversation).  Each generator may yield multiple
+        ``OmniRequestOutput`` objects (e.g. text + audio), which are
+        grouped by prompt index.  Multi-modal choices are collapsed
+        into one choice per conversation via ``_maybe_collapse_choices``.
+        """
+        from collections import defaultdict
+
+        from vllm.entrypoints.openai.chat_completion.protocol import ChatMessage
+
+        created_time = int(time.time())
+
+        per_item_outputs: dict[int, list[Any]] = defaultdict(list)
+        try:
+            async for prompt_idx, res in merge_async_iterators(*generators):
+                per_item_outputs[prompt_idx].append(res)
+        except asyncio.CancelledError:
+            return self.create_error_response("Client disconnected")
+
+        choices: list[ChatCompletionResponseChoice] = []
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+
+        requested_modalities = (
+            set(request.modalities)
+            if hasattr(request, "modalities") and request.modalities
+            else None
+        )
+        role = self.get_chat_request_role(request)
+
+        for prompt_idx in range(len(generators)):
+            outputs = per_item_outputs.get(prompt_idx)
+            if not outputs:
+                return self.create_error_response(
+                    f"No output received from the engine for prompt {prompt_idx}.",
+                )
+
+            item_choices: list[ChatCompletionResponseChoice] = []
+
+            for omni_output in outputs:
+                if (
+                    hasattr(omni_output, "finished")
+                    and not omni_output.finished
+                ):
+                    continue
+
+                output_type = getattr(
+                    omni_output, "final_output_type", "text"
+                )
+                if (
+                    requested_modalities is not None
+                    and output_type not in requested_modalities
+                ):
+                    continue
+
+                if output_type == "text":
+                    has_ar_output = (
+                        getattr(omni_output, "stage_id", None) is not None
+                        or getattr(omni_output, "outputs", None)
+                    )
+                    if has_ar_output:
+                        conversation = all_conversations[prompt_idx]
+                        (
+                            choices_data,
+                            usage,
+                            _prompt_logprobs,
+                            _prompt_token_ids,
+                            _kv_transfer_params,
+                        ) = self._create_text_choice(
+                            request,
+                            omni_output,
+                            tokenizer,
+                            conversation,
+                            role,
+                            reasoning_parser,
+                        )
+                        item_choices.extend(choices_data)
+                        total_prompt_tokens += usage.prompt_tokens
+                        total_completion_tokens += usage.completion_tokens
+                    else:
+                        text_body = self._get_diffusion_text_output(
+                            omni_output
+                        )
+                        message = ChatMessage(role=role, content=text_body)
+                        item_choices.append(
+                            ChatCompletionResponseChoice(
+                                index=0,
+                                message=message,
+                                logprobs=None,
+                                finish_reason="stop",
+                                stop_reason=None,
+                            )
+                        )
+
+                elif output_type == "audio":
+                    audio_choices = self._create_audio_choice(
+                        omni_output, role, request, stream=False,
+                    )
+                    if isinstance(audio_choices, ErrorResponse):
+                        return audio_choices
+                    item_choices.extend(audio_choices)
+
+                elif output_type == "image":
+                    img_choices = self._create_image_choice(
+                        omni_output, role, request, stream=False,
+                    )
+                    item_choices.extend(img_choices)
+
+            if not item_choices:
+                return self.create_error_response(
+                    f"No valid output for prompt {prompt_idx}.",
+                )
+
+            try:
+                collapsed = self._maybe_collapse_choices(item_choices)
+            except ValueError as e:
+                return self.create_error_response(
+                    f"Failed to collapse choices for item {prompt_idx}: {e}",
+                )
+            collapsed.index = prompt_idx
+            choices.append(collapsed)
+
+        usage = UsageInfo(
+            prompt_tokens=total_prompt_tokens,
+            completion_tokens=total_completion_tokens,
+            total_tokens=total_prompt_tokens + total_completion_tokens,
+        )
+        request_metadata.final_usage_info = usage
+
+        return ChatCompletionResponse(
+            id=request_id,
+            created=created_time,
+            model=model_name,
+            choices=choices,
+            usage=usage,
+        )
 
     async def create_batch_chat_completion(
         self,
