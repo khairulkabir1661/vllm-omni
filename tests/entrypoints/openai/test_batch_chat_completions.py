@@ -105,7 +105,7 @@ def test_subrequest_ids_are_unique(has_header: bool):
         messages=MSG_BATCH,
         seed=42,
     )
-    result = asyncio.run(handler.create_batch_chat_completion(request, _make_raw_request(headers)))
+    result = asyncio.run(handler._create_batch_chat_completion_legacy(request, _make_raw_request(headers)))
     assert not isinstance(result, ErrorResponse)
     assert result.id.startswith("chatcmpl-batch")
 
@@ -429,3 +429,125 @@ def test_generator_batch_empty_generator_returns_error():
         )
     )
     assert isinstance(result, ErrorResponse)
+
+
+# ---------------------------------------------------------------------------
+# Tests for create_batch_chat_completion wiring (PR D: optimized path)
+# ---------------------------------------------------------------------------
+
+def _make_wiring_handler(n_items=2):
+    """Build handler with mocked render + engine for optimized-path tests."""
+    handler = OmniOpenAIServingChatBatch.__new__(OmniOpenAIServingChatBatch)
+
+    conversations = [[{"role": "user", "content": f"Q{i}"}] for i in range(n_items)]
+    engine_prompts = [{"prompt_token_ids": [1, 2, 3]} for _ in range(n_items)]
+    single_reqs = [MagicMock() for _ in range(n_items)]
+
+    async def _render_side_effect(req):
+        req.modalities = ["text"]
+        return (conversations, engine_prompts, single_reqs)
+
+    handler.render_batch_chat_request = AsyncMock(
+        side_effect=_render_side_effect,
+    )
+    handler._maybe_get_adapters = MagicMock(return_value=None)
+    handler.models = MagicMock()
+    handler.models.model_name.return_value = "test-model"
+    handler.renderer = MagicMock()
+    handler.renderer.get_tokenizer.return_value = MagicMock()
+    handler.parser_cls = None
+    handler._log_inputs = MagicMock()
+    handler._build_sampling_params_list_from_request = MagicMock(
+        return_value=[MagicMock()],
+    )
+
+    handler.engine_client = MagicMock()
+    handler.engine_client.generate = MagicMock(
+        side_effect=lambda **kw: _async_gen(
+            _make_text_omni_output("ok", prompt_tokens=5, completion_tokens=3),
+        ),
+    )
+
+    handler.chat_completion_full_generator_batch = AsyncMock(
+        return_value=ChatCompletionResponse(
+            model="test-model",
+            choices=[
+                ChatCompletionResponseChoice(
+                    index=i,
+                    message=ChatMessage(role="assistant", content="ok"),
+                )
+                for i in range(n_items)
+            ],
+            usage=UsageInfo(prompt_tokens=10, completion_tokens=6, total_tokens=16),
+        ),
+    )
+    handler.create_error_response = MagicMock(
+        side_effect=lambda msg, **kw: ErrorResponse(
+            error=ErrorInfo(message=msg, type="InternalServerError", code=500),
+        ),
+    )
+    return handler
+
+
+def test_optimized_path_calls_render_once():
+    handler = _make_wiring_handler(3)
+    request = _make_batch_request(3)
+    raw_request = _make_raw_request([])
+
+    result = asyncio.run(handler.create_batch_chat_completion(request, raw_request))
+    assert not isinstance(result, ErrorResponse)
+    handler.render_batch_chat_request.assert_called_once_with(request)
+    # Verify request_id passed to generator_batch starts with chatcmpl-batch
+    call_args = handler.chat_completion_full_generator_batch.call_args
+    passed_request_id = call_args[0][2]  # 3rd positional arg
+    assert passed_request_id.startswith("chatcmpl-batch")
+
+
+def test_optimized_path_submits_to_engine_per_item():
+    handler = _make_wiring_handler(3)
+    request = _make_batch_request(3)
+    raw_request = _make_raw_request([])
+
+    asyncio.run(handler.create_batch_chat_completion(request, raw_request))
+    assert handler.engine_client.generate.call_count == 3
+
+
+def test_optimized_path_unique_subrequest_ids():
+    handler = _make_wiring_handler(3)
+    request = _make_batch_request(3)
+    raw_request = _make_raw_request([])
+
+    asyncio.run(handler.create_batch_chat_completion(request, raw_request))
+    ids = [
+        call.kwargs["request_id"]
+        for call in handler.engine_client.generate.call_args_list
+    ]
+    assert len(set(ids)) == 3
+
+
+def test_optimized_path_header_in_request_ids():
+    handler = _make_wiring_handler(2)
+    request = _make_batch_request(2)
+    raw_request = _make_raw_request([(b"x-request-id", b"user-456")])
+
+    asyncio.run(handler.create_batch_chat_completion(request, raw_request))
+    ids = [
+        call.kwargs["request_id"]
+        for call in handler.engine_client.generate.call_args_list
+    ]
+    assert all("user-456" in rid for rid in ids)
+
+
+def test_optimized_path_render_error_short_circuits():
+    handler = _make_wiring_handler(2)
+    handler.render_batch_chat_request = AsyncMock(
+        return_value=ErrorResponse(
+            error=ErrorInfo(message="bad model", type="NotFoundError", code=404),
+        ),
+    )
+    request = _make_batch_request(2)
+    raw_request = _make_raw_request([])
+
+    result = asyncio.run(handler.create_batch_chat_completion(request, raw_request))
+    assert isinstance(result, ErrorResponse)
+    handler.engine_client.generate.assert_not_called()

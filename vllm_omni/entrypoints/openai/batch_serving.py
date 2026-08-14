@@ -31,6 +31,7 @@ from vllm.utils.async_utils import merge_async_iterators
 
 from vllm_omni.entrypoints.openai.serving_chat import OmniOpenAIServingChat
 from vllm_omni.entrypoints.openai.utils import is_single_stage_diffusion
+from vllm_omni.entrypoints.utils import coerce_param_message_types
 
 logger = init_logger(__name__)
 
@@ -368,8 +369,110 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
         request: BatchChatCompletionRequest,
         raw_request: Request,
     ) -> ChatCompletionResponse | ErrorResponse:
-        """Given a request, submit each request to chat completions & collect the results."""
-        return await self._create_batch_chat_completion_legacy(request, raw_request)
+        """Process N conversations concurrently via direct engine submission.
+
+        Validates the request once, preprocesses each conversation, submits
+        each to the engine directly, and collects results into a single
+        response.
+        """
+        render_result = await self.render_batch_chat_request(request)
+        if isinstance(render_result, ErrorResponse):
+            return render_result
+        all_conversations, all_engine_prompts, single_requests = render_result
+
+        base_id = self._base_request_id(raw_request, request.request_id)
+        request_id = f"chatcmpl-batch-{base_id}"
+
+        lora_request = self._maybe_get_adapters(
+            request, supports_default_mm_loras=True,
+        )
+        model_name = self.models.model_name(lora_request)
+
+        tokenizer = self.renderer.get_tokenizer()
+        if tokenizer is None:
+            tokenizer = await self.engine_client.get_tokenizer()
+
+        reasoning_parser = None
+        if (
+            self.parser_cls is not None
+            and self.parser_cls.reasoning_parser_cls is not None
+        ):
+            chat_template_kwargs = self._effective_chat_template_kwargs(
+                request,
+            )
+            reasoning_parser = self.parser_cls.reasoning_parser_cls(
+                tokenizer,
+                chat_template_kwargs=chat_template_kwargs,
+            )
+
+        request_metadata = RequestResponseMetadata(request_id=request_id)
+        if raw_request:
+            raw_request.state.request_metadata = request_metadata
+
+        output_modalities = request.modalities
+
+        request_timestamp = time.time()
+        if raw_request is not None:
+            request_timestamp = float(
+                getattr(
+                    raw_request.state,
+                    "request_timestamp",
+                    request_timestamp,
+                )
+            )
+
+        generators = []
+        try:
+            for i, engine_prompt in enumerate(all_engine_prompts):
+                sub_request_id = f"{request_id}-idx-{i}"
+
+                if (
+                    hasattr(request, "sampling_params_list")
+                    and request.sampling_params_list
+                ):
+                    sampling_params_list = self._to_sampling_params_list(
+                        request.sampling_params_list,
+                    )
+                else:
+                    sampling_params_list = (
+                        self._build_sampling_params_list_from_request(
+                            single_requests[i],
+                        )
+                    )
+
+                sampling_params_list = coerce_param_message_types(
+                    sampling_params_list, False,
+                )
+
+                self._log_inputs(
+                    sub_request_id,
+                    engine_prompt,
+                    params_list=sampling_params_list,
+                    lora_request=lora_request,
+                )
+
+                generator = self.engine_client.generate(
+                    prompt=engine_prompt,
+                    request_id=sub_request_id,
+                    sampling_params_list=sampling_params_list,
+                    output_modalities=output_modalities,
+                    arrival_time=request_timestamp,
+                    lora_request=lora_request,
+                )
+                generators.append(generator)
+        except ValueError as e:
+            return self.create_error_response(str(e))
+
+        return await self.chat_completion_full_generator_batch(
+            request,
+            generators,
+            request_id,
+            model_name,
+            all_conversations,
+            tokenizer,
+            request_metadata,
+            reasoning_parser,
+        )
 
     async def _create_batch_chat_completion_legacy(
         self,
