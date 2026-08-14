@@ -27,7 +27,6 @@ from vllm.tokenizers.mistral import (
     truncate_tool_call_ids,
     validate_request_params,
 )
-
 from vllm.utils.async_utils import merge_async_iterators
 
 from vllm_omni.entrypoints.openai.serving_chat import OmniOpenAIServingChat
@@ -258,9 +257,7 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
         total_completion_tokens = 0
 
         requested_modalities = (
-            set(request.modalities)
-            if hasattr(request, "modalities") and request.modalities
-            else None
+            set(request.modalities) if hasattr(request, "modalities") and request.modalities else None
         )
         role = self.get_chat_request_role(request)
 
@@ -274,25 +271,16 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
             item_choices: list[ChatCompletionResponseChoice] = []
 
             for omni_output in outputs:
-                if (
-                    hasattr(omni_output, "finished")
-                    and not omni_output.finished
-                ):
+                if hasattr(omni_output, "finished") and not omni_output.finished:
                     continue
 
-                output_type = getattr(
-                    omni_output, "final_output_type", "text"
-                )
-                if (
-                    requested_modalities is not None
-                    and output_type not in requested_modalities
-                ):
+                output_type = getattr(omni_output, "final_output_type", "text")
+                if requested_modalities is not None and output_type not in requested_modalities:
                     continue
 
                 if output_type == "text":
-                    has_ar_output = (
-                        getattr(omni_output, "stage_id", None) is not None
-                        or getattr(omni_output, "outputs", None)
+                    has_ar_output = getattr(omni_output, "stage_id", None) is not None or getattr(
+                        omni_output, "outputs", None
                     )
                     if has_ar_output:
                         conversation = all_conversations[prompt_idx]
@@ -314,9 +302,7 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
                         total_prompt_tokens += usage.prompt_tokens
                         total_completion_tokens += usage.completion_tokens
                     else:
-                        text_body = self._get_diffusion_text_output(
-                            omni_output
-                        )
+                        text_body = self._get_diffusion_text_output(omni_output)
                         message = ChatMessage(role=role, content=text_body)
                         item_choices.append(
                             ChatCompletionResponseChoice(
@@ -330,7 +316,10 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
 
                 elif output_type == "audio":
                     audio_choices = self._create_audio_choice(
-                        omni_output, role, request, stream=False,
+                        omni_output,
+                        role,
+                        request,
+                        stream=False,
                     )
                     if isinstance(audio_choices, ErrorResponse):
                         return audio_choices
@@ -338,7 +327,10 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
 
                 elif output_type == "image":
                     img_choices = self._create_image_choice(
-                        omni_output, role, request, stream=False,
+                        omni_output,
+                        role,
+                        request,
+                        stream=False,
                     )
                     item_choices.extend(img_choices)
 
