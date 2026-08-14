@@ -154,6 +154,7 @@ def test_three_choices_raises():
 # Tests for render_batch_chat_request (PR B: validate-once)
 # ---------------------------------------------------------------------------
 
+
 def _make_render_handler():
     """Build an OmniOpenAIServingChatBatch with mocked internals for render tests."""
     handler = OmniOpenAIServingChatBatch.__new__(OmniOpenAIServingChatBatch)
@@ -192,10 +193,7 @@ def _make_render_handler():
 
 
 def _make_batch_request(n: int = 2) -> BatchChatCompletionRequest:
-    messages = [
-        [ChatCompletionUserMessageParam(role="user", content=f"Question {i}")]
-        for i in range(n)
-    ]
+    messages = [[ChatCompletionUserMessageParam(role="user", content=f"Question {i}")] for i in range(n)]
     return BatchChatCompletionRequest(model="test-model", messages=messages)
 
 

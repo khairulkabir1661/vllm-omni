@@ -122,26 +122,17 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
         tool_choice = getattr(request, "tool_choice", None)
         tools = getattr(request, "tools", None)
         tool_parsing_unavailable = (
-            tool_parser is None
-            and not isinstance(tokenizer, MistralTokenizer)
-            and not self.use_harmony
+            tool_parser is None and not isinstance(tokenizer, MistralTokenizer) and not self.use_harmony
         )
         if tool_parsing_unavailable and tool_choice not in (None, "none"):
             if tool_choice == "auto" and not self.enable_auto_tools:
                 return self.create_error_response(
-                    '"auto" tool choice requires '
-                    "--enable-auto-tool-choice and --tool-call-parser to be set"
+                    '"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set'
                 )
             elif tool_choice != "auto":
-                return self.create_error_response(
-                    f'tool_choice="{tool_choice}" requires '
-                    "--tool-call-parser to be set"
-                )
+                return self.create_error_response(f'tool_choice="{tool_choice}" requires --tool-call-parser to be set')
 
-        if tools is None or (
-            tool_choice == "none"
-            and self.exclude_tools_when_tool_choice_none
-        ):
+        if tools is None or (tool_choice == "none" and self.exclude_tools_when_tool_choice_none):
             tool_dicts = None
         else:
             tool_dicts = [tool.model_dump() for tool in tools]
@@ -150,26 +141,18 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
         if not self.use_harmony:
             error_check_ret = self.online_renderer.validate_chat_template(
                 request_chat_template=getattr(request, "chat_template", None),
-                chat_template_kwargs=getattr(
-                    request, "chat_template_kwargs", None
-                ),
+                chat_template_kwargs=getattr(request, "chat_template_kwargs", None),
                 trust_request_chat_template=self.trust_request_chat_template,
             )
             if error_check_ret is not None:
                 return error_check_ret
 
         # Check 11: Output modalities validation
-        engine_output_modalities = [
-            x for x in self.engine_client.output_modalities if x is not None
-        ]
+        engine_output_modalities = [x for x in self.engine_client.output_modalities if x is not None]
         output_modalities = getattr(request, "modalities", engine_output_modalities)
-        request.modalities = (
-            output_modalities if output_modalities is not None else engine_output_modalities
-        )
+        request.modalities = output_modalities if output_modalities is not None else engine_output_modalities
 
-        if not isinstance(request.modalities, list) or not all(
-            isinstance(m, str) for m in request.modalities
-        ):
+        if not isinstance(request.modalities, list) or not all(isinstance(m, str) for m in request.modalities):
             return self.create_error_response("'modalities' must be a list of strings.")
         allowed_modalities = set(engine_output_modalities)
         if is_single_stage_diffusion(self.engine_client):
@@ -205,12 +188,8 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
                     conversation, engine_prompts = await self._preprocess_chat(
                         single_request,
                         single_request.messages,
-                        default_template=(
-                            single_request.chat_template or self.chat_template
-                        ),
-                        default_template_content_format=(
-                            self.chat_template_content_format
-                        ),
+                        default_template=(single_request.chat_template or self.chat_template),
+                        default_template_content_format=(self.chat_template_content_format),
                         default_template_kwargs=merged_kwargs,
                         tool_dicts=tool_dicts,
                         tool_parser=tool_parser,
@@ -222,10 +201,9 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
                     )
                 else:
                     should_include_tools = tool_dicts is not None
-                    conversation, engine_prompts = (
-                        self.online_renderer._make_request_with_harmony(
-                            single_request, should_include_tools,
-                        )
+                    conversation, engine_prompts = self.online_renderer._make_request_with_harmony(
+                        single_request,
+                        should_include_tools,
                     )
             except (ValueError, TypeError, RuntimeError) as e:
                 logger.exception("Error preprocessing batch item")
