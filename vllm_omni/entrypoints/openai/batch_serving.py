@@ -66,6 +66,14 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
         raw_request: Request,
     ) -> ChatCompletionResponse | ErrorResponse:
         """Given a request, submit each request to chat completions & collect the results."""
+        return await self._create_batch_chat_completion_legacy(request, raw_request)
+
+    async def _create_batch_chat_completion_legacy(
+        self,
+        request: BatchChatCompletionRequest,
+        raw_request: Request,
+    ) -> ChatCompletionResponse | ErrorResponse:
+        """Legacy implementation: submits each item via create_chat_completion."""
         model = ""
         enabled_streaming = False
         chat_requests: list[ChatCompletionRequest] = []
