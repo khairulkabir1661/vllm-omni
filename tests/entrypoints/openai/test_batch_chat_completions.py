@@ -435,6 +435,7 @@ def test_generator_batch_empty_generator_returns_error():
 # Tests for create_batch_chat_completion wiring (PR D: optimized path)
 # ---------------------------------------------------------------------------
 
+
 def _make_wiring_handler(n_items=2):
     """Build handler with mocked render + engine for optimized-path tests."""
     handler = OmniOpenAIServingChatBatch.__new__(OmniOpenAIServingChatBatch)
@@ -518,10 +519,7 @@ def test_optimized_path_unique_subrequest_ids():
     raw_request = _make_raw_request([])
 
     asyncio.run(handler.create_batch_chat_completion(request, raw_request))
-    ids = [
-        call.kwargs["request_id"]
-        for call in handler.engine_client.generate.call_args_list
-    ]
+    ids = [call.kwargs["request_id"] for call in handler.engine_client.generate.call_args_list]
     assert len(set(ids)) == 3
 
 
@@ -531,10 +529,7 @@ def test_optimized_path_header_in_request_ids():
     raw_request = _make_raw_request([(b"x-request-id", b"user-456")])
 
     asyncio.run(handler.create_batch_chat_completion(request, raw_request))
-    ids = [
-        call.kwargs["request_id"]
-        for call in handler.engine_client.generate.call_args_list
-    ]
+    ids = [call.kwargs["request_id"] for call in handler.engine_client.generate.call_args_list]
     assert all("user-456" in rid for rid in ids)
 
 

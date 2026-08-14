@@ -384,7 +384,8 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
         request_id = f"chatcmpl-batch-{base_id}"
 
         lora_request = self._maybe_get_adapters(
-            request, supports_default_mm_loras=True,
+            request,
+            supports_default_mm_loras=True,
         )
         model_name = self.models.model_name(lora_request)
 
@@ -393,10 +394,7 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
             tokenizer = await self.engine_client.get_tokenizer()
 
         reasoning_parser = None
-        if (
-            self.parser_cls is not None
-            and self.parser_cls.reasoning_parser_cls is not None
-        ):
+        if self.parser_cls is not None and self.parser_cls.reasoning_parser_cls is not None:
             chat_template_kwargs = self._effective_chat_template_kwargs(
                 request,
             )
@@ -426,22 +424,18 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
             for i, engine_prompt in enumerate(all_engine_prompts):
                 sub_request_id = f"{request_id}-idx-{i}"
 
-                if (
-                    hasattr(request, "sampling_params_list")
-                    and request.sampling_params_list
-                ):
+                if hasattr(request, "sampling_params_list") and request.sampling_params_list:
                     sampling_params_list = self._to_sampling_params_list(
                         request.sampling_params_list,
                     )
                 else:
-                    sampling_params_list = (
-                        self._build_sampling_params_list_from_request(
-                            single_requests[i],
-                        )
+                    sampling_params_list = self._build_sampling_params_list_from_request(
+                        single_requests[i],
                     )
 
                 sampling_params_list = coerce_param_message_types(
-                    sampling_params_list, False,
+                    sampling_params_list,
+                    False,
                 )
 
                 self._log_inputs(
