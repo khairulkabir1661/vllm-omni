@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from openai.types.chat import ChatCompletionUserMessageParam
@@ -12,7 +12,7 @@ from vllm.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionResponseChoice,
     ChatMessage,
 )
-from vllm.entrypoints.openai.engine.protocol import ErrorResponse, UsageInfo
+from vllm.entrypoints.openai.engine.protocol import ErrorInfo, ErrorResponse, UsageInfo
 
 from vllm_omni.entrypoints.openai.batch_serving import OmniOpenAIServingChatBatch
 
@@ -148,3 +148,120 @@ def test_two_content_choices_raises():
 def test_three_choices_raises():
     with pytest.raises(ValueError, match="got 3"):
         collapse([_text_choice(), _audio_choice(), _text_choice()])
+
+
+# ---------------------------------------------------------------------------
+# Tests for render_batch_chat_request (PR B: validate-once)
+# ---------------------------------------------------------------------------
+
+def _make_render_handler():
+    """Build an OmniOpenAIServingChatBatch with mocked internals for render tests."""
+    handler = OmniOpenAIServingChatBatch.__new__(OmniOpenAIServingChatBatch)
+    handler._check_model = AsyncMock(return_value=None)
+    handler.engine_client = MagicMock()
+    handler.engine_client.errored = False
+    handler.engine_client.output_modalities = ["text"]
+    handler._maybe_get_adapters = MagicMock(return_value=None)
+    handler.models = MagicMock()
+    handler.models.model_name.return_value = "test-model"
+    handler.renderer = MagicMock()
+    handler.renderer.get_tokenizer.return_value = MagicMock()
+    handler.parser_cls = None
+    handler.use_harmony = False
+    handler.online_renderer = MagicMock()
+    handler.online_renderer.validate_chat_template.return_value = None
+    handler.enable_auto_tools = False
+    handler.exclude_tools_when_tool_choice_none = False
+    handler.chat_template = None
+    handler.chat_template_content_format = "string"
+    handler.trust_request_chat_template = False
+    handler._preprocess_chat = AsyncMock(
+        return_value=(
+            [{"role": "user", "content": "hi"}],
+            [{"prompt_token_ids": [1, 2, 3]}],
+        )
+    )
+    handler._effective_chat_template_kwargs = MagicMock(return_value={})
+    handler.create_error_response = MagicMock(
+        side_effect=lambda msg, **kw: ErrorResponse(
+            error=ErrorInfo(message=msg, type="BadRequestError", code=400),
+        )
+    )
+    handler._resolve_audio_format = MagicMock(return_value="wav")
+    return handler
+
+
+def _make_batch_request(n: int = 2) -> BatchChatCompletionRequest:
+    messages = [
+        [ChatCompletionUserMessageParam(role="user", content=f"Question {i}")]
+        for i in range(n)
+    ]
+    return BatchChatCompletionRequest(model="test-model", messages=messages)
+
+
+def test_render_model_check_called_once():
+    handler = _make_render_handler()
+    asyncio.run(handler.render_batch_chat_request(_make_batch_request(5)))
+    handler._check_model.assert_called_once()
+
+
+def test_render_model_check_error_propagates():
+    handler = _make_render_handler()
+    handler._check_model.return_value = ErrorResponse(
+        error=ErrorInfo(message="not found", type="NotFoundError", code=404),
+    )
+    result = asyncio.run(handler.render_batch_chat_request(_make_batch_request(5)))
+    assert isinstance(result, ErrorResponse)
+    handler._preprocess_chat.assert_not_called()
+
+
+def test_render_engine_dead_raises():
+    handler = _make_render_handler()
+    handler.engine_client.errored = True
+    handler.engine_client.dead_error = RuntimeError("Engine dead")
+    with pytest.raises(RuntimeError, match="Engine dead"):
+        asyncio.run(handler.render_batch_chat_request(_make_batch_request(3)))
+
+
+def test_render_template_validation_called_once():
+    handler = _make_render_handler()
+    asyncio.run(handler.render_batch_chat_request(_make_batch_request(4)))
+    handler.online_renderer.validate_chat_template.assert_called_once()
+
+
+def test_render_template_validation_error_propagates():
+    handler = _make_render_handler()
+    handler.online_renderer.validate_chat_template.return_value = ErrorResponse(
+        error=ErrorInfo(message="untrusted", type="BadRequestError", code=400),
+    )
+    result = asyncio.run(handler.render_batch_chat_request(_make_batch_request(3)))
+    assert isinstance(result, ErrorResponse)
+    handler._preprocess_chat.assert_not_called()
+
+
+def test_render_returns_correct_count():
+    handler = _make_render_handler()
+    result = asyncio.run(handler.render_batch_chat_request(_make_batch_request(4)))
+    assert not isinstance(result, ErrorResponse)
+    conversations, prompts, single_requests = result
+    assert len(conversations) == 4
+    assert len(prompts) == 4
+    assert len(single_requests) == 4
+
+
+def test_render_preprocess_called_per_item():
+    handler = _make_render_handler()
+    asyncio.run(handler.render_batch_chat_request(_make_batch_request(3)))
+    assert handler._preprocess_chat.call_count == 3
+
+
+def test_render_audio_format_error_propagates():
+    handler = _make_render_handler()
+    handler.engine_client.output_modalities = ["text", "audio"]
+    request = _make_batch_request(2)
+    request.modalities = ["text", "audio"]
+    handler._resolve_audio_format.return_value = ErrorResponse(
+        error=ErrorInfo(message="bad format", type="BadRequestError", code=400),
+    )
+    result = asyncio.run(handler.render_batch_chat_request(request))
+    assert isinstance(result, ErrorResponse)
