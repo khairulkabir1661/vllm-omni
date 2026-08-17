@@ -342,14 +342,15 @@ def _make_generator_handler():
     return handler
 
 
-def test_generator_batch_text_only():
+def test_generator_batch_happy_path():
     handler = _make_generator_handler()
     generators = [
-        _async_gen(_make_text_omni_output(f"Answer {i}", prompt_tokens=10, completion_tokens=5)) for i in range(3)
+        _async_gen(_make_text_omni_output("a", prompt_tokens=10, completion_tokens=5)),
+        _async_gen(_make_text_omni_output("b", prompt_tokens=20, completion_tokens=15)),
     ]
-    request = _make_batch_request(3)
+    request = _make_batch_request(2)
     request.modalities = ["text"]
-    conversations = [[{"role": "user", "content": f"Q{i}"}] for i in range(3)]
+    conversations = [[{"role": "user", "content": "q"}]] * 2
     metadata = RequestResponseMetadata(request_id="batch-1")
 
     result = asyncio.run(
@@ -364,9 +365,12 @@ def test_generator_batch_text_only():
         )
     )
     assert not isinstance(result, ErrorResponse)
-    assert len(result.choices) == 3
+    assert len(result.choices) == 2
     for i, choice in enumerate(result.choices):
         assert choice.index == i
+    assert result.usage.prompt_tokens == 30
+    assert result.usage.completion_tokens == 20
+    assert result.usage.total_tokens == 50
 
 
 def test_generator_batch_text_plus_audio():
@@ -400,34 +404,6 @@ def test_generator_batch_text_plus_audio():
         assert choice.message.content == "hello"
         assert choice.message.audio is not None
         assert choice.message.audio.data == "base64audio"
-
-
-def test_generator_batch_usage_aggregation():
-    handler = _make_generator_handler()
-    generators = [
-        _async_gen(_make_text_omni_output("a", prompt_tokens=10, completion_tokens=5)),
-        _async_gen(_make_text_omni_output("b", prompt_tokens=20, completion_tokens=15)),
-    ]
-    request = _make_batch_request(2)
-    request.modalities = ["text"]
-    conversations = [[{"role": "user", "content": "q"}]] * 2
-    metadata = RequestResponseMetadata(request_id="batch-3")
-
-    result = asyncio.run(
-        handler.chat_completion_full_generator_batch(
-            request,
-            generators,
-            "batch-3",
-            "test-model",
-            conversations,
-            MagicMock(),
-            metadata,
-        )
-    )
-    assert not isinstance(result, ErrorResponse)
-    assert result.usage.prompt_tokens == 30
-    assert result.usage.completion_tokens == 20
-    assert result.usage.total_tokens == 50
 
 
 def test_generator_batch_empty_generator_returns_error():
