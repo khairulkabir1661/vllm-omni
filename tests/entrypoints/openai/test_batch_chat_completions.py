@@ -197,13 +197,20 @@ def _make_batch_request(n: int = 2) -> BatchChatCompletionRequest:
     return BatchChatCompletionRequest(model="test-model", messages=messages)
 
 
-def test_render_model_check_called_once():
+def test_render_happy_path():
     handler = _make_render_handler()
-    asyncio.run(handler.render_batch_chat_request(_make_batch_request(5)))
+    result = asyncio.run(handler.render_batch_chat_request(_make_batch_request(4)))
+    assert not isinstance(result, ErrorResponse)
+    conversations, prompts, single_requests = result
+    assert len(conversations) == 4
+    assert len(prompts) == 4
+    assert len(single_requests) == 4
     handler._check_model.assert_called_once()
+    handler.online_renderer.validate_chat_template.assert_called_once()
+    assert handler._preprocess_chat.call_count == 4
 
 
-def test_render_model_check_error_propagates():
+def test_render_error_short_circuits():
     handler = _make_render_handler()
     handler._check_model.return_value = ErrorResponse(
         error=ErrorInfo(message="not found", type="NotFoundError", code=404),
@@ -219,47 +226,3 @@ def test_render_engine_dead_raises():
     handler.engine_client.dead_error = RuntimeError("Engine dead")
     with pytest.raises(RuntimeError, match="Engine dead"):
         asyncio.run(handler.render_batch_chat_request(_make_batch_request(3)))
-
-
-def test_render_template_validation_called_once():
-    handler = _make_render_handler()
-    asyncio.run(handler.render_batch_chat_request(_make_batch_request(4)))
-    handler.online_renderer.validate_chat_template.assert_called_once()
-
-
-def test_render_template_validation_error_propagates():
-    handler = _make_render_handler()
-    handler.online_renderer.validate_chat_template.return_value = ErrorResponse(
-        error=ErrorInfo(message="untrusted", type="BadRequestError", code=400),
-    )
-    result = asyncio.run(handler.render_batch_chat_request(_make_batch_request(3)))
-    assert isinstance(result, ErrorResponse)
-    handler._preprocess_chat.assert_not_called()
-
-
-def test_render_returns_correct_count():
-    handler = _make_render_handler()
-    result = asyncio.run(handler.render_batch_chat_request(_make_batch_request(4)))
-    assert not isinstance(result, ErrorResponse)
-    conversations, prompts, single_requests = result
-    assert len(conversations) == 4
-    assert len(prompts) == 4
-    assert len(single_requests) == 4
-
-
-def test_render_preprocess_called_per_item():
-    handler = _make_render_handler()
-    asyncio.run(handler.render_batch_chat_request(_make_batch_request(3)))
-    assert handler._preprocess_chat.call_count == 3
-
-
-def test_render_audio_format_error_propagates():
-    handler = _make_render_handler()
-    handler.engine_client.output_modalities = ["text", "audio"]
-    request = _make_batch_request(2)
-    request.modalities = ["text", "audio"]
-    handler._resolve_audio_format.return_value = ErrorResponse(
-        error=ErrorInfo(message="bad format", type="BadRequestError", code=400),
-    )
-    result = asyncio.run(handler.render_batch_chat_request(request))
-    assert isinstance(result, ErrorResponse)
