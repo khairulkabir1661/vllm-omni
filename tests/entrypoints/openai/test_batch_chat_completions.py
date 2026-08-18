@@ -490,7 +490,7 @@ def _make_wiring_handler(n_items=2):
     return handler
 
 
-def test_optimized_path_calls_render_once():
+def test_optimized_path_happy_path():
     handler = _make_wiring_handler(3)
     request = _make_batch_request(3)
     raw_request = _make_raw_request([])
@@ -498,29 +498,12 @@ def test_optimized_path_calls_render_once():
     result = asyncio.run(handler.create_batch_chat_completion(request, raw_request))
     assert not isinstance(result, ErrorResponse)
     handler.render_batch_chat_request.assert_called_once_with(request)
-    # Verify request_id passed to generator_batch starts with chatcmpl-batch
-    call_args = handler.chat_completion_full_generator_batch.call_args
-    passed_request_id = call_args[0][2]  # 3rd positional arg
-    assert passed_request_id.startswith("chatcmpl-batch")
-
-
-def test_optimized_path_submits_to_engine_per_item():
-    handler = _make_wiring_handler(3)
-    request = _make_batch_request(3)
-    raw_request = _make_raw_request([])
-
-    asyncio.run(handler.create_batch_chat_completion(request, raw_request))
     assert handler.engine_client.generate.call_count == 3
-
-
-def test_optimized_path_unique_subrequest_ids():
-    handler = _make_wiring_handler(3)
-    request = _make_batch_request(3)
-    raw_request = _make_raw_request([])
-
-    asyncio.run(handler.create_batch_chat_completion(request, raw_request))
     ids = [call.kwargs["request_id"] for call in handler.engine_client.generate.call_args_list]
     assert len(set(ids)) == 3
+    call_args = handler.chat_completion_full_generator_batch.call_args
+    passed_request_id = call_args[0][2]
+    assert passed_request_id.startswith("chatcmpl-batch")
 
 
 def test_optimized_path_header_in_request_ids():
