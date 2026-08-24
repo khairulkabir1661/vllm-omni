@@ -73,6 +73,11 @@ DIFFUSION_TEST_SETTINGS = {
         model="black-forest-labs/FLUX.2-dev",
         builder=diff_model_builders.tiny_flux2_builder,
         supported_tasks=[DiffusionTasks.TEXT_TO_IMAGE],
+        extra_test_groups=[
+            [DiffusionAccs.HSDP, DiffusionAccs.CACHE_DIT],
+            [DiffusionAccs.SEQUENCE_PARALLEL, DiffusionAccs.CACHE_DIT, DiffusionAccs.LAYERWISE_OFFLOAD],
+            [DiffusionAccs.CFG_PARALLEL, DiffusionAccs.TENSOR_PARALLEL, DiffusionAccs.CPU_OFFLOAD],
+        ],
     ),
     "QwenImageEditPipeline": DiffusionModelTestOpts(
         model="Qwen/Qwen-Image-Edit",
@@ -88,5 +93,9 @@ DIFFUSION_TEST_SETTINGS = {
         model="stabilityai/stable-diffusion-3.5-medium",
         builder=diff_model_builders.tiny_sd3_builder,
         supported_tasks=[DiffusionTasks.TEXT_TO_IMAGE],
+        extra_test_groups=[
+            [DiffusionAccs.CACHE_DIT, DiffusionAccs.LAYERWISE_OFFLOAD],
+            [DiffusionAccs.CFG_PARALLEL, DiffusionAccs.TENSOR_PARALLEL, DiffusionAccs.CPU_OFFLOAD],
+        ],
     ),
 }
