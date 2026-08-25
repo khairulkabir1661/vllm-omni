@@ -27,6 +27,9 @@ from tests.model_tests.diffusion.task_runners import (
 )
 
 # NOTE: Hardware and model type marks are added dynamically based on test requirements and model type
+pytestmark = [pytest.mark.xdist, pytest.mark.xdist_group(name="online_diffusion")]
+
+
 @pytest.mark.parametrize(
     "model_name,accelerations,supported_tasks,check_multioutput,check_determinism",
     get_parametrized_options(DIFFUSION_TEST_SETTINGS, online=True),

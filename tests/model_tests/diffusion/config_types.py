@@ -62,6 +62,10 @@ class DiffusionModelTestOpts(NamedTuple):
     # Actual tasks which controls the tests actually run
     supported_tasks: list[DiffusionTasks]
 
+    # Function module marker applied per-test-case via parametrization.
+    # Set to ModelTypeMarker.OMNI or ModelTypeMarker.TTS for non-diffusion models.
+    model_type_marker: ModelTypeMarker
+
     # Additional acceleration groups to run beyond the base case (no acceleration).
     # The base case is always run for every model in the test settings. None means
     # we only run the base case.
@@ -83,10 +87,6 @@ class DiffusionModelTestOpts(NamedTuple):
     # Additional checks to run for the base case.
     check_multi_output: bool = True  # Runs multiple generations in one request
     check_determinism: bool = True  # Runs 2 generations with the same seed and check determinism
-
-    # Function module marker applied per-test-case via parametrization.
-    # Set to ModelTypeMarker.OMNI or ModelTypeMarker.TTS for non-diffusion models.
-    model_type_marker: ModelTypeMarker
 
 
 ### Mappings & utils for building offline Omni() instances given a list of enabled accelerations

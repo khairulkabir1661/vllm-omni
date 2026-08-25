@@ -34,39 +34,42 @@ DIFFUSION_TEST_SETTINGS = {
         model="black-forest-labs/FLUX.2-klein-4B",
         builder=diff_model_builders.tiny_flux2_klein_builder,
         supported_tasks=[DiffusionTasks.TEXT_TO_IMAGE, DiffusionTasks.IMAGE_TO_IMAGE],
+        model_type_marker=ModelTypeMarker.DIFFUSION,
         extra_test_groups=[
             [DiffusionAccs.HSDP, DiffusionAccs.TEA_CACHE],
             [DiffusionAccs.SEQUENCE_PARALLEL, DiffusionAccs.CACHE_DIT, DiffusionAccs.LAYERWISE_OFFLOAD],
             [DiffusionAccs.CFG_PARALLEL, DiffusionAccs.TENSOR_PARALLEL, DiffusionAccs.CPU_OFFLOAD],
         ],
-        model_type_marker=ModelTypeMarker.DIFFUSION,
     ),
     "LTX2Pipeline": DiffusionModelTestOpts(
         model="Lightricks/LTX-2",
         builder=diff_model_builders.tiny_ltx2_builder,
         supported_tasks=[DiffusionTasks.TEXT_TO_VIDEO, DiffusionTasks.IMAGE_TO_VIDEO],
+        model_type_marker=ModelTypeMarker.DIFFUSION,
         extra_test_groups=[
             [DiffusionAccs.HSDP, DiffusionAccs.CACHE_DIT],
             [DiffusionAccs.SEQUENCE_PARALLEL, DiffusionAccs.CACHE_DIT, DiffusionAccs.LAYERWISE_OFFLOAD],
             [DiffusionAccs.CFG_PARALLEL, DiffusionAccs.TENSOR_PARALLEL, DiffusionAccs.CPU_OFFLOAD],
         ],
-        model_type_marker=ModelTypeMarker.DIFFUSION,
     ),
     "SanaVideoPipeline": DiffusionModelTestOpts(
         model="Efficient-Large-Model/SANA-Video_2B_480p_diffusers",
         builder=diff_model_builders.tiny_sana_video_builder,
         supported_tasks=[DiffusionTasks.TEXT_TO_VIDEO],
+        model_type_marker=ModelTypeMarker.DIFFUSION,
         check_multi_output=False,
     ),
     "QwenImagePipeline": DiffusionModelTestOpts(
         model="Qwen/Qwen-Image",
         builder=diff_model_builders.tiny_qwen_image_builder,
         supported_tasks=[DiffusionTasks.TEXT_TO_IMAGE],
+        model_type_marker=ModelTypeMarker.DIFFUSION,
     ),
     "LongCatImagePipeline": DiffusionModelTestOpts(
         model="meituan-longcat/LongCat-Image",
         builder=diff_model_builders.tiny_longcat_image_builder,
         supported_tasks=[DiffusionTasks.TEXT_TO_IMAGE],
+        model_type_marker=ModelTypeMarker.DIFFUSION,
         extra_test_groups=[
             [DiffusionAccs.TEA_CACHE],
             [DiffusionAccs.SEQUENCE_PARALLEL, DiffusionAccs.CACHE_DIT, DiffusionAccs.LAYERWISE_OFFLOAD],
@@ -77,6 +80,7 @@ DIFFUSION_TEST_SETTINGS = {
         model="meituan-longcat/LongCat-Image-Edit",
         builder=diff_model_builders.tiny_longcat_image_edit_builder,
         supported_tasks=[DiffusionTasks.IMAGE_TO_IMAGE],
+        model_type_marker=ModelTypeMarker.DIFFUSION,
         extra_test_groups=[
             [DiffusionAccs.TEA_CACHE],
             [DiffusionAccs.SEQUENCE_PARALLEL, DiffusionAccs.CACHE_DIT, DiffusionAccs.LAYERWISE_OFFLOAD],
@@ -87,11 +91,13 @@ DIFFUSION_TEST_SETTINGS = {
         model="black-forest-labs/FLUX.1-schnell",
         builder=diff_model_builders.tiny_flux_builder,
         supported_tasks=[DiffusionTasks.TEXT_TO_IMAGE],
+        model_type_marker=ModelTypeMarker.DIFFUSION,
     ),
     "FluxKontextPipeline": DiffusionModelTestOpts(
         model="black-forest-labs/FLUX.1-Kontext-dev",
         builder=diff_model_builders.tiny_flux_kontext_builder,
         supported_tasks=[DiffusionTasks.TEXT_TO_IMAGE, DiffusionTasks.IMAGE_TO_IMAGE],
+        model_type_marker=ModelTypeMarker.DIFFUSION,
         extra_test_groups=[
             [DiffusionAccs.TENSOR_PARALLEL, DiffusionAccs.CPU_OFFLOAD],
             [DiffusionAccs.CFG_PARALLEL, DiffusionAccs.CPU_OFFLOAD],
@@ -102,15 +108,18 @@ DIFFUSION_TEST_SETTINGS = {
         model="black-forest-labs/FLUX.2-dev",
         builder=diff_model_builders.tiny_flux2_builder,
         supported_tasks=[DiffusionTasks.TEXT_TO_IMAGE],
+        model_type_marker=ModelTypeMarker.DIFFUSION,
     ),
     "QwenImageEditPipeline": DiffusionModelTestOpts(
         model="Qwen/Qwen-Image-Edit",
         builder=diff_model_builders.tiny_qwen_image_edit_builder,
         supported_tasks=[DiffusionTasks.IMAGE_TO_IMAGE],
+        model_type_marker=ModelTypeMarker.DIFFUSION,
     ),
     "QwenImageEditPlusPipeline": DiffusionModelTestOpts(
         model="Qwen/Qwen-Image-Edit-2511",
         builder=diff_model_builders.tiny_qwen_image_edit_plus_builder,
         supported_tasks=[DiffusionTasks.IMAGE_TO_IMAGE],
+        model_type_marker=ModelTypeMarker.DIFFUSION,
     ),
 }
