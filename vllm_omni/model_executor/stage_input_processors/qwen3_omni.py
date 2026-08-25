@@ -481,7 +481,8 @@ def thinker2talker_async_chunk(
     thinker_hid = _layer_tensor(thinker_layers, str(accept_hidden_idx))
     if thinker_emb is None or thinker_hid is None:
         logger.debug(
-            "thinker2talker_async_chunk: missing thinker layers for req=%s (embedding_layer=%d:%s accept_hidden_layer=%d:%s)",
+            "thinker2talker_async_chunk: missing thinker layers for req=%s "
+            "(embedding_layer=%d:%s accept_hidden_layer=%d:%s)",
             request_id,
             embedding_idx,
             thinker_emb is not None,
