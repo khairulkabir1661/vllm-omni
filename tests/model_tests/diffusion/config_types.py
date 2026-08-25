@@ -39,6 +39,14 @@ class DiffusionTasks(str, Enum):
     # Text to audio, etc should be added here as needed
 
 
+class ModelTypeMarker(str, Enum):
+    """Model type markers for pytest parametrization."""
+
+    DIFFUSION = "diffusion"
+    OMNI = "omni"
+    TTS = "tts"
+
+
 class DiffusionModelTestOpts(NamedTuple):
     """Configuration for one Diffusion model's tests."""
 
@@ -77,8 +85,8 @@ class DiffusionModelTestOpts(NamedTuple):
     check_determinism: bool = True  # Runs 2 generations with the same seed and check determinism
 
     # Function module marker applied per-test-case via parametrization.
-    # Override to "omni" or "tts" for non-diffusion models.
-    model_type_marker: str = "diffusion"
+    # Set to ModelTypeMarker.OMNI or ModelTypeMarker.TTS for non-diffusion models.
+    model_type_marker: ModelTypeMarker
 
 
 ### Mappings & utils for building offline Omni() instances given a list of enabled accelerations

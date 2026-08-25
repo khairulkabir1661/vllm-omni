@@ -3,6 +3,7 @@ from tests.model_tests.diffusion.config_types import (
     DiffusionAccs,
     DiffusionModelTestOpts,
     DiffusionTasks,
+    ModelTypeMarker,
 )
 
 # This object defines the (tiny) model configurations for common tests.
@@ -38,6 +39,7 @@ DIFFUSION_TEST_SETTINGS = {
             [DiffusionAccs.SEQUENCE_PARALLEL, DiffusionAccs.CACHE_DIT, DiffusionAccs.LAYERWISE_OFFLOAD],
             [DiffusionAccs.CFG_PARALLEL, DiffusionAccs.TENSOR_PARALLEL, DiffusionAccs.CPU_OFFLOAD],
         ],
+        model_type_marker=ModelTypeMarker.DIFFUSION,
     ),
     "LTX2Pipeline": DiffusionModelTestOpts(
         model="Lightricks/LTX-2",
@@ -48,6 +50,7 @@ DIFFUSION_TEST_SETTINGS = {
             [DiffusionAccs.SEQUENCE_PARALLEL, DiffusionAccs.CACHE_DIT, DiffusionAccs.LAYERWISE_OFFLOAD],
             [DiffusionAccs.CFG_PARALLEL, DiffusionAccs.TENSOR_PARALLEL, DiffusionAccs.CPU_OFFLOAD],
         ],
+        model_type_marker=ModelTypeMarker.DIFFUSION,
     ),
     "SanaVideoPipeline": DiffusionModelTestOpts(
         model="Efficient-Large-Model/SANA-Video_2B_480p_diffusers",

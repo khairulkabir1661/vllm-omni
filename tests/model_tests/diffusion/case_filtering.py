@@ -17,7 +17,12 @@ import itertools
 import pytest
 
 from tests.helpers.mark import hardware_marks
-from tests.model_tests.diffusion.config_types import DiffusionAccs, DiffusionModelTestOpts, get_required_device_count
+from tests.model_tests.diffusion.config_types import (
+    DiffusionAccs,
+    DiffusionModelTestOpts,
+    ModelTypeMarker,
+    get_required_device_count,
+)
 from vllm_omni.platforms import current_omni_platform
 
 # These tests are intended to run on L4 GPUs since they test parallelism (i.e., need GPUs),
@@ -33,7 +38,7 @@ def get_test_group_marks(
     model_name: str,
     test_group: list[DiffusionAccs] | None,
     model_marks: list | None,
-    model_type_marker: str = "diffusion",
+    model_type_marker: ModelTypeMarker,
 ) -> list:
     """Build the full set of pytest marks for a test group.
 
