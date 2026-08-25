@@ -2495,7 +2495,13 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
                 logger.info("Using precomputed Qwen3-TTS custom voice profile: %s (mode=%s)", voice_lower, mode)
 
         elif params["task_type"][0] == "CustomVoice":
-            params["speaker"] = ["Vivian"]  # Default for CustomVoice
+            if self._adapter is not None and self._adapter.capabilities.default_speaker:
+                params["speaker"] = [self._adapter.capabilities.default_speaker]
+            else:
+                raise ValueError(
+                    "CustomVoice task requires a speaker but no speakers are "
+                    "configured in this model's spk_id config."
+                )
 
         # Instructions for style/emotion control
         if request.instructions is not None:
