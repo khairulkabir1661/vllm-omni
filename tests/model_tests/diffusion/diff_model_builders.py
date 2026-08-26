@@ -2,10 +2,6 @@ import json
 import os
 from functools import partial
 from pathlib import Path
-from unittest.mock import patch
-
-import torch
-from torch import nn
 
 import torch
 from diffusers import (
@@ -320,108 +316,24 @@ def _shrink_krea2_vae(config: dict) -> dict:
     return config
 
 
-def _build_krea2_transformer_weights(config: dict, out_dir: str) -> None:
-    """Instantiate the transformer with mocked linear layers and save its state dict."""
-    from safetensors.torch import save_file
-
-    class _FakeLinear(nn.Linear):
-        def __init__(self, in_features, out_features, bias=True, **kwargs):
-            super().__init__(in_features, out_features, bias=bias)
-
-    class _FakeAttention(nn.Module):
-        def __init__(self, **kwargs):
-            super().__init__()
-
-    import vllm_omni.diffusion.models.krea2.krea2_transformer as krea2_mod
-
-    with (
-        patch.object(krea2_mod, "ReplicatedLinear", _FakeLinear),
-        patch.object(krea2_mod, "Attention", _FakeAttention),
-    ):
-        model = krea2_mod.Krea2Transformer2DModel(
-            in_channels=config.get("in_channels", 64),
-            num_layers=config["num_layers"],
-            attention_head_dim=config["attention_head_dim"],
-            num_attention_heads=config["num_attention_heads"],
-            num_key_value_heads=config["num_key_value_heads"],
-            intermediate_size=config["intermediate_size"],
-            timestep_embed_dim=config["timestep_embed_dim"],
-            text_hidden_dim=config["text_hidden_dim"],
-            num_text_layers=config["num_text_layers"],
-            text_num_attention_heads=config["text_num_attention_heads"],
-            text_num_key_value_heads=config["text_num_key_value_heads"],
-            text_intermediate_size=config["text_intermediate_size"],
-            num_layerwise_text_blocks=config["num_layerwise_text_blocks"],
-            num_refiner_text_blocks=config["num_refiner_text_blocks"],
-            axes_dims_rope=tuple(config["axes_dims_rope"]),
-            rope_theta=config.get("rope_theta", 1000.0),
-            norm_eps=config.get("norm_eps", 1e-5),
-            od_config=None,
-            quant_config=None,
-        )
-
-    state_dict = {k: v.contiguous() for k, v in model.state_dict().items()}
-    os.makedirs(out_dir, exist_ok=True)
-    save_file(state_dict, os.path.join(out_dir, "model.safetensors"))
-
-
 def tiny_krea2_builder() -> str:
-    """Build a tiny Krea2 model with random weights.
+    """Build a tiny Krea2 model with random weights using diffusers building blocks."""
+    model_dir = build_tiny_from_configs(
+        "Krea2Pipeline",
+        "krea/Krea-2-Turbo",
+        transform={
+            "text_encoder": _shrink_krea2_text_encoder,
+            "transformer": _shrink_krea2_transformer,
+            "vae": _shrink_krea2_vae,
+        },
+    )
 
-    Cannot use build_tiny_from_configs because Krea2 classes are not in diffusers.
-    Instead, downloads configs from HF, applies shrink transforms, and creates each
-    component individually.
-    """
-    from diffusers import AutoencoderKLQwenImage, FlowMatchEulerDiscreteScheduler
-    from huggingface_hub import hf_hub_download
-    from transformers import AutoTokenizer, PretrainedConfig, Qwen3VLModel
-
-    from tests.helpers.tiny_model import _get_tiny_model_path
-
-    model_id = "krea/Krea-2-Turbo"
-    model_dir = _get_tiny_model_path("Krea2Pipeline")
-
-    # --- model_index.json ---
-    idx_path = hf_hub_download(model_id, "model_index.json")
+    # Add text_encoder_select_layers to model_index.json to match shrunk text encoder
+    idx_path = os.path.join(model_dir, "model_index.json")
     with open(idx_path) as f:
         model_index = json.load(f)
     model_index["text_encoder_select_layers"] = [0, 1, 2]
-    idx_out = os.path.join(model_dir, "model_index.json")
-    with open(idx_out, "w") as f:
+    with open(idx_path, "w") as f:
         json.dump(model_index, f, indent=2)
-
-    # --- text encoder (Qwen3VLModel) ---
-    config_dict, _ = PretrainedConfig.get_config_dict(model_id, subfolder="text_encoder")
-    config_dict = _shrink_krea2_text_encoder(config_dict)
-    config = Qwen3VLModel.config_class.from_dict(config_dict)
-    text_encoder = Qwen3VLModel(config)
-    te_dir = os.path.join(model_dir, "text_encoder")
-    text_encoder.to(torch.bfloat16).save_pretrained(te_dir)
-
-    # --- VAE (AutoencoderKLQwenImage) ---
-    vae_config = AutoencoderKLQwenImage.load_config(model_id, subfolder="vae")
-    vae_config = _shrink_krea2_vae(dict(vae_config))
-    vae = AutoencoderKLQwenImage.from_config(vae_config)
-    vae_dir = os.path.join(model_dir, "vae")
-    vae.to(torch.bfloat16).save_pretrained(vae_dir)
-
-    # --- scheduler ---
-    scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(model_id, subfolder="scheduler")
-    scheduler.save_pretrained(os.path.join(model_dir, "scheduler"))
-
-    # --- tokenizer ---
-    tokenizer = AutoTokenizer.from_pretrained(model_id, subfolder="tokenizer")
-    tokenizer.save_pretrained(os.path.join(model_dir, "tokenizer"))
-
-    # --- transformer (Krea2Transformer2DModel) ---
-    tf_path = hf_hub_download(model_id, "transformer/config.json")
-    with open(tf_path) as f:
-        tf_config = json.load(f)
-    tf_config = _shrink_krea2_transformer(tf_config)
-    tf_dir = os.path.join(model_dir, "transformer")
-    os.makedirs(tf_dir, exist_ok=True)
-    with open(os.path.join(tf_dir, "config.json"), "w") as f:
-        json.dump(tf_config, f, indent=2)
-    _build_krea2_transformer_weights(tf_config, tf_dir)
 
     return model_dir
