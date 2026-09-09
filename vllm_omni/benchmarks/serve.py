@@ -17,6 +17,7 @@ from typing import Any
 
 import numpy as np
 
+from vllm.logger import init_logger
 from vllm.benchmarks.serve import (
     TaskType,
     check_goodput_args,
@@ -37,6 +38,8 @@ from vllm_omni.benchmarks.patch.patch import (
     set_print_stage,
     should_request_stage_metrics,
 )
+
+logger = init_logger(__name__)
 
 _DIFFUSION_ENDPOINTS = frozenset({
     "/v1/images/generations",
@@ -68,7 +71,7 @@ async def _main_async_diffusion(args: argparse.Namespace) -> dict[str, Any]:
     """
     from vllm_omni.benchmarks.patch.patch import benchmark, get_samples
 
-    print(args)
+    logger.info("Diffusion benchmark args: %s", args)
     random.seed(args.seed)
     np.random.seed(args.seed)
 
@@ -105,11 +108,11 @@ async def _main_async_diffusion(args: argparse.Namespace) -> dict[str, Any]:
 
     # Model resolution (mirrors upstream lines 1956-1964)
     if args.model is None:
-        print("Model not specified, fetching first model from server...")
+        logger.info("Model not specified, fetching first model from server...")
         model_name, model_id = await get_first_model_from_server(
             base_url, headers, ssl_context
         )
-        print(f"First model name: {model_name}, first model id: {model_id}")
+        logger.info("First model name: %s, first model id: %s", model_name, model_id)
     else:
         model_name = getattr(args, "served_model_name", args.model)
         model_id = args.model
