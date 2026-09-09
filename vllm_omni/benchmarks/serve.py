@@ -155,6 +155,9 @@ async def _main_async_diffusion(args: argparse.Namespace) -> dict[str, Any]:
         lora_modules=None,
         extra_headers=headers,
         extra_body=extra_body,
+        ramp_up_strategy=getattr(args, "ramp_up_strategy", None),
+        ramp_up_start_rps=getattr(args, "ramp_up_start_rps", None),
+        ramp_up_end_rps=getattr(args, "ramp_up_end_rps", None),
         ready_check_timeout_sec=getattr(args, "ready_check_timeout_sec", 600),
         ssl_context=ssl_context,
     )
@@ -164,6 +167,7 @@ async def _main_async_diffusion(args: argparse.Namespace) -> dict[str, Any]:
     current_dt = datetime.now().strftime("%Y%m%d-%H%M%S")
     result_json["date"] = current_dt
     result_json["backend"] = args.backend
+    result_json["endpoint_type"] = args.backend
     result_json["label"] = label
     result_json["model_id"] = model_id
     result_json["tokenizer_id"] = None
@@ -215,6 +219,8 @@ async def _main_async_diffusion(args: argparse.Namespace) -> dict[str, Any]:
                 mode="a+" if args.append_result else "w",
                 encoding="utf-8",
             ) as outfile:
+                if args.append_result and outfile.tell() != 0:
+                    outfile.write("\n")
                 json.dump(result_json, outfile, indent=2, default=str)
 
     return result_json
