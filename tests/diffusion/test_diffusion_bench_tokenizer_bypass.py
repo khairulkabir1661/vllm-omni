@@ -24,11 +24,14 @@ def test_diffusion_endpoints_detected(endpoint):
     assert is_diffusion_benchmark(Namespace(endpoint=endpoint, backend=""))
 
 
-@pytest.mark.parametrize("endpoint,backend", [
-    ("/v1/chat/completions", ""),
-    ("", "openai-chat-omni"),
-    ("", ""),
-])
+@pytest.mark.parametrize(
+    "endpoint,backend",
+    [
+        ("/v1/chat/completions", ""),
+        ("", "openai-chat-omni"),
+        ("", ""),
+    ],
+)
 def test_non_diffusion_not_detected(endpoint, backend):
     assert not is_diffusion_benchmark(Namespace(endpoint=endpoint, backend=backend))
 
@@ -60,8 +63,8 @@ def test_tokenizer_is_none_throughout():
         backend="openai-image-gen-omni",
         seed=42,
         base_url="http://localhost:8000",
-        model="ByteDance-Seed/BAGEL-7B-MoT",
-        served_model_name="ByteDance-Seed/BAGEL-7B-MoT",
+        model="stabilityai/stable-diffusion-3.5-medium",
+        served_model_name="stabilityai/stable-diffusion-3.5-medium",
         extra_body={},
         header=None,
         insecure=False,
@@ -86,14 +89,17 @@ def test_tokenizer_is_none_throughout():
         result_dir=None,
         ramp_up_strategy=None,
     )
-    with patch(
-        "vllm_omni.benchmarks.patch.patch.get_samples",
-        return_value=[],
-    ) as mock_samples, patch(
-        "vllm_omni.benchmarks.patch.patch.benchmark",
-        new_callable=AsyncMock,
-        return_value={},
-    ) as mock_bench:
+    with (
+        patch(
+            "vllm_omni.benchmarks.patch.patch.get_samples",
+            return_value=[],
+        ) as mock_samples,
+        patch(
+            "vllm_omni.benchmarks.patch.patch.benchmark",
+            new_callable=AsyncMock,
+            return_value={},
+        ) as mock_bench,
+    ):
         asyncio.run(_main_async_diffusion(args))
         assert mock_samples.call_args[0][1] is None
         assert mock_bench.call_args[1]["tokenizer"] is None

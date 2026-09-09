@@ -16,8 +16,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
-from vllm.logger import init_logger
 from vllm.benchmarks.serve import (
     TaskType,
     check_goodput_args,
@@ -74,17 +72,22 @@ def _use_endpoint_backend_when_implicit(args: argparse.Namespace) -> None:
     if endpoint in _ENDPOINT_BACKEND_KEYS:
         args.backend = endpoint
 
-_DIFFUSION_ENDPOINTS = frozenset({
-    "/v1/images/generations",
-    "/v1/images/edits",
-    "/v1/videos",
-})
 
-_DIFFUSION_BACKENDS = frozenset({
-    "openai-image-gen-omni",
-    "openai-image-edits-omni",
-    "openai-video-omni",
-})
+_DIFFUSION_ENDPOINTS = frozenset(
+    {
+        "/v1/images/generations",
+        "/v1/images/edits",
+        "/v1/videos",
+    }
+)
+
+_DIFFUSION_BACKENDS = frozenset(
+    {
+        "openai-image-gen-omni",
+        "openai-image-edits-omni",
+        "openai-video-omni",
+    }
+)
 
 
 def is_diffusion_benchmark(args) -> bool:
@@ -128,9 +131,7 @@ async def _main_async_diffusion(args: argparse.Namespace) -> dict[str, Any]:
                 kvstring = item.split("=", 1)
                 headers[kvstring[0].strip()] = kvstring[1].strip()
             else:
-                raise ValueError(
-                    "Invalid header format. Please use KEY=VALUE format."
-                )
+                raise ValueError("Invalid header format. Please use KEY=VALUE format.")
 
     # SSL context (mirrors upstream lines 1946-1953)
     ssl_context: ssl.SSLContext | bool | None = None
@@ -142,9 +143,7 @@ async def _main_async_diffusion(args: argparse.Namespace) -> dict[str, Any]:
     # Model resolution (mirrors upstream lines 1956-1964)
     if args.model is None:
         logger.info("Model not specified, fetching first model from server...")
-        model_name, model_id = await get_first_model_from_server(
-            base_url, headers, ssl_context
-        )
+        model_name, model_id = await get_first_model_from_server(base_url, headers, ssl_context)
         logger.info("First model name: %s, first model id: %s", model_name, model_id)
     else:
         model_name = getattr(args, "served_model_name", args.model)
@@ -159,9 +158,7 @@ async def _main_async_diffusion(args: argparse.Namespace) -> dict[str, Any]:
     goodput_config_dict = check_goodput_args(args)
     extra_body = args.extra_body or {}
 
-    percentile_metrics: str = (
-        getattr(args, "percentile_metrics", None) or "ttft,tpot,itl"
-    )
+    percentile_metrics: str = getattr(args, "percentile_metrics", None) or "ttft,tpot,itl"
 
     freeze_gc_heap()
 
@@ -181,10 +178,7 @@ async def _main_async_diffusion(args: argparse.Namespace) -> dict[str, Any]:
         num_warmups=getattr(args, "num_warmups", 1),
         profile=False,
         selected_percentile_metrics=percentile_metrics.split(","),
-        selected_percentiles=[
-            float(p)
-            for p in getattr(args, "metric_percentiles", "99").split(",")
-        ],
+        selected_percentiles=[float(p) for p in getattr(args, "metric_percentiles", "99").split(",")],
         ignore_eos=False,
         goodput_config_dict=goodput_config_dict,
         max_concurrency=getattr(args, "max_concurrency", None),
@@ -215,13 +209,9 @@ async def _main_async_diffusion(args: argparse.Namespace) -> dict[str, Any]:
                 kvstring = item.split("=", 1)
                 result_json[kvstring[0].strip()] = kvstring[1].strip()
             else:
-                raise ValueError(
-                    "Invalid metadata format. Please use KEY=VALUE format."
-                )
+                raise ValueError("Invalid metadata format. Please use KEY=VALUE format.")
 
-    result_json["request_rate"] = (
-        args.request_rate if args.request_rate < float("inf") else "inf"
-    )
+    result_json["request_rate"] = args.request_rate if args.request_rate < float("inf") else "inf"
     result_json["burstiness"] = getattr(args, "burstiness", 1.0)
     result_json["max_concurrency"] = getattr(args, "max_concurrency", None)
 
@@ -242,13 +232,9 @@ async def _main_async_diffusion(args: argparse.Namespace) -> dict[str, Any]:
             result_json.pop(field, None)
             benchmark_result.pop(field, None)
 
-    if getattr(args, "save_result", False) or getattr(
-        args, "append_result", False
-    ):
+    if getattr(args, "save_result", False) or getattr(args, "append_result", False):
         if file_name is None:
-            warnings.warn(
-                "Cannot save results: file_name is None", stacklevel=2
-            )
+            warnings.warn("Cannot save results: file_name is None", stacklevel=2)
         else:
             with open(
                 file_name,
