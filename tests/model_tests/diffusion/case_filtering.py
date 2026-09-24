@@ -50,7 +50,7 @@ def get_test_group_marks(
     the max number of GPUs for the CI to prevent accidentally adding configurations that
     would be skipped in the CI."""
     marks = list(model_marks) if model_marks is not None else []
-    marks.append(getattr(pytest.mark, model_type_marker))
+    marks.append(getattr(pytest.mark, model_type_marker.value))
 
     required_devices = get_required_device_count(test_group)
     if required_devices > MAX_CI_DEVICES:
