@@ -150,7 +150,6 @@ class OmniServerParams(NamedTuple):
     use_stage_cli: bool = False
     init_timeout: int | None = None
     stage_init_timeout: int | None = None  # None: fixture supplies default (600 s)
-    startup_timeout: int = SERVER_STARTUP_TIMEOUT_S
 
 
 class OmniServer:
@@ -164,13 +163,12 @@ class OmniServer:
         port: int | None = None,
         env_dict: dict[str, str] | None = None,
         use_omni: bool = True,
-        startup_timeout: int = SERVER_STARTUP_TIMEOUT_S,
     ) -> None:
         cleanup_test_environment()
-        self.startup_timeout = startup_timeout
         self.model = model
-        self.serve_args = list(serve_args)
-        self.log_stats = "--disable-log-stats" not in self.serve_args and "--log-stats" in self.serve_args
+        args = list(serve_args)
+        self.serve_args = args
+        self.log_stats = "--disable-log-stats" not in args and "--log-stats" in args
         self.env_dict = env_dict
         self.use_omni = use_omni
         self.proc: subprocess.Popen | None = None
@@ -250,7 +248,7 @@ class OmniServer:
             cwd=_omni_subprocess_cwd(),
         )
 
-        max_wait = self.startup_timeout
+        max_wait = SERVER_STARTUP_TIMEOUT_S
         # System clock corrections must not shorten or extend startup waits.
         start_time = time.monotonic()
         while time.monotonic() - start_time < max_wait:
@@ -444,11 +442,8 @@ class OmniServerStageCli(OmniServer):
         stage_ids: list[int] | None = None,
         port: int | None = None,
         env_dict: dict[str, str] | None = None,
-        startup_timeout: int = SERVER_STARTUP_TIMEOUT_S,
     ) -> None:
-        super().__init__(
-            model, serve_args or [], port=port, env_dict=env_dict, use_omni=True, startup_timeout=startup_timeout
-        )
+        super().__init__(model, serve_args or [], port=port, env_dict=env_dict, use_omni=True)
         self.stage_config_path = stage_config_path
         self.master_port = get_open_port()
         resolved_cfg = resolve_deploy_yaml(stage_config_path)
@@ -558,7 +553,7 @@ class OmniServerStageCli(OmniServer):
             for replica_id in range(self.stage_replica_counts.get(stage_id, 1)):
                 self._launch_stage(stage_id, headless=True, replica_id=replica_id)
 
-        max_wait = self.startup_timeout
+        max_wait = SERVER_STARTUP_TIMEOUT_S
         # System clock corrections must not shorten or extend startup waits.
         start_time = time.monotonic()
         while time.monotonic() - start_time < max_wait:
@@ -1015,17 +1010,18 @@ def iter_omni_server(
         server_args = params.server_args or []
         if model != original_model:
             server_args = [*server_args, "--served-model-name", original_model]
-        if params.use_omni and params.stage_init_timeout is not None:
-            server_args = [*server_args, "--stage-init-timeout", str(params.stage_init_timeout)]
-        else:
-            server_args = [*server_args, "--stage-init-timeout", "600"]
-        if params.init_timeout is not None:
-            server_args = [*server_args, "--init-timeout", str(params.init_timeout)]
-        else:
-            server_args = [*server_args, "--init-timeout", "900"]
-        # ``omni_server`` / ``omni_server_function``: match ``serve`` (``--disable-log-stats`` wins).
-        if "--disable-log-stats" not in server_args and "--log-stats" not in server_args:
-            server_args = [*server_args, "--log-stats"]
+        if params.use_omni:
+            if params.stage_init_timeout is not None:
+                server_args = [*server_args, "--stage-init-timeout", str(params.stage_init_timeout)]
+            else:
+                server_args = [*server_args, "--stage-init-timeout", "600"]
+            if params.init_timeout is not None:
+                server_args = [*server_args, "--init-timeout", str(params.init_timeout)]
+            else:
+                server_args = [*server_args, "--init-timeout", "900"]
+            # ``omni_server`` / ``omni_server_function``: match ``serve`` (``--disable-log-stats`` wins).
+            if "--disable-log-stats" not in server_args and "--log-stats" not in server_args:
+                server_args = [*server_args, "--log-stats"]
         if params.use_stage_cli:
             if not params.use_omni:
                 raise ValueError("omni_server with use_stage_cli=True requires use_omni=True")
@@ -1038,7 +1034,6 @@ def iter_omni_server(
                 server_args,
                 port=port,
                 env_dict=params.env_dict,
-                startup_timeout=params.startup_timeout,
             ) as server:
                 if model != original_model:
                     server.model = original_model
@@ -1056,7 +1051,6 @@ def iter_omni_server(
                     port=port,
                     env_dict=params.env_dict,
                     use_omni=params.use_omni,
-                    startup_timeout=params.startup_timeout,
                 )
                 if port
                 else OmniServer(
@@ -1064,7 +1058,6 @@ def iter_omni_server(
                     server_args,
                     env_dict=params.env_dict,
                     use_omni=params.use_omni,
-                    startup_timeout=params.startup_timeout,
                 )
             ) as server:
                 if model != original_model:
