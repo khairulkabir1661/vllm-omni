@@ -30,7 +30,7 @@ _ASR_PARAMS = [
         OmniServerParams(
             model="openai/whisper-small",
             server_args=["--enforce-eager"],
-            use_omni=False,
+            use_omni=True,
         ),
         id="whisper_small",
         marks=hardware_marks(res={"cuda": "H100"}),
@@ -42,7 +42,7 @@ _NON_ASR_PARAMS = [
         OmniServerParams(
             model="JackFram/llama-68m",
             server_args=["--enforce-eager"],
-            use_omni=False,
+            use_omni=True,
         ),
         id="llama_68m",
         marks=hardware_marks(res={"cuda": "H100"}),

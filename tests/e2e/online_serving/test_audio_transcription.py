@@ -36,7 +36,7 @@ _server_params = [
         OmniServerParams(
             model=MODEL,
             server_args=["--enforce-eager"],
-            use_omni=False,
+            use_omni=True,
         ),
         id="whisper_small",
         marks=hardware_marks(res={"cuda": "H100"}),
