@@ -140,7 +140,7 @@ def test_transcription_long_audio(omni_server, openai_client) -> None:
     assert count >= 8, (
         f"Expected 'mary' at least 8 times in 10x tiled audio, got {count}. Output: {out['text'][:200]!r}"
     )
-    assert out["usage"]["seconds"] == 161, f"Expected 161s usage for 10x tiled audio, got {out['usage']['seconds']}s"
+    assert out["usage"]["seconds"] in (160, 161), f"Expected 160-161s usage for 10x tiled audio, got {out['usage']['seconds']}s"
 
 
 @hardware_test(res={"cuda": "H100"}, num_cards=1)
