@@ -21,19 +21,22 @@ import numpy as np
 import pybase64 as base64
 import pytest
 import websockets
+from vllm.assets.audio import AudioAsset
+from vllm.multimodal.media.audio import load_audio
 
 from tests.helpers.mark import hardware_marks, hardware_test
 from tests.helpers.runtime import OmniServerParams
-from vllm.assets.audio import AudioAsset
-from vllm.multimodal.media.audio import load_audio
 
 pytestmark = [pytest.mark.slow, pytest.mark.omni]
 
 MODEL = "mistralai/Voxtral-Mini-4B-Realtime-2602"
 MISTRAL_ARGS = [
-    "--tokenizer_mode", "mistral",
-    "--config_format", "mistral",
-    "--load_format", "mistral",
+    "--tokenizer_mode",
+    "mistral",
+    "--config_format",
+    "mistral",
+    "--load_format",
+    "mistral",
 ]
 
 _server_params = [
@@ -42,7 +45,8 @@ _server_params = [
             model=MODEL,
             server_args=[
                 "--enforce-eager",
-                "--max-model-len", "2048",
+                "--max-model-len",
+                "2048",
                 *MISTRAL_ARGS,
             ],
             env_dict={"VLLM_ENGINE_ITERATION_TIMEOUT_S": "600"},
@@ -168,9 +172,7 @@ def test_realtime_session_update(omni_server, openai_client) -> None:
 
             await _send(ws, {"type": "session.update", "model": omni_server.model})
             event = await _recv(ws, timeout=10.0)
-            assert event["type"] == "session.updated", (
-                f"Expected session.updated, got {event}"
-            )
+            assert event["type"] == "session.updated", f"Expected session.updated, got {event}"
 
     asyncio.run(_run())
 
@@ -195,9 +197,7 @@ def test_realtime_multi_chunk_streaming(omni_server, openai_client) -> None:
             assert done_event["text"] == full_text, (
                 f"done.text mismatch: {done_event['text']!r} vs accumulated {full_text!r}"
             )
-            assert "mary" in full_text.lower(), (
-                f"Expected 'mary' in transcription, got: {full_text!r}"
-            )
+            assert "mary" in full_text.lower(), f"Expected 'mary' in transcription, got: {full_text!r}"
 
     asyncio.run(_run())
 
@@ -225,9 +225,7 @@ def test_realtime_transcription_delta_schema(omni_server, openai_client) -> None
                 if event["type"] == "transcription.delta":
                     delta_seen = True
                     assert "delta" in event, f"Missing 'delta' key: {event}"
-                    assert isinstance(event["delta"], str), (
-                        f"delta is not a string: {type(event['delta'])}"
-                    )
+                    assert isinstance(event["delta"], str), f"delta is not a string: {type(event['delta'])}"
                 elif event["type"] == "transcription.done":
                     assert "text" in event, f"Missing 'text' in done event: {event}"
                     assert isinstance(event["text"], str)
@@ -257,9 +255,7 @@ def test_realtime_invalid_model_error(omni_server, openai_client) -> None:
             await _send(ws, {"type": "session.update", "model": "nonexistent-model"})
             event = await _recv(ws, timeout=10.0)
             assert event["type"] == "error", f"Expected error, got {event}"
-            assert "nonexistent-model" in event.get("error", ""), (
-                f"Error should mention bad model name: {event}"
-            )
+            assert "nonexistent-model" in event.get("error", ""), f"Error should mention bad model name: {event}"
 
     asyncio.run(_run())
 
@@ -278,9 +274,7 @@ def test_realtime_commit_without_session_update(omni_server, openai_client) -> N
             await _send(ws, {"type": "input_audio_buffer.commit", "final": True})
             event = await _recv(ws, timeout=10.0)
             assert event["type"] == "error", f"Expected error, got {event}"
-            assert "model_not_validated" in event.get("code", ""), (
-                f"Expected code 'model_not_validated', got: {event}"
-            )
+            assert "model_not_validated" in event.get("code", ""), f"Expected code 'model_not_validated', got: {event}"
 
     asyncio.run(_run())
 
@@ -319,7 +313,6 @@ def test_realtime_empty_commit_recovery(omni_server, openai_client) -> None:
 def test_realtime_graceful_close(omni_server, openai_client) -> None:
     """Clean WebSocket close after session setup does not crash the server."""
     ws_url = _ws_url(openai_client)
-    audio_chunks = _get_audio_chunks()
 
     async def _run():
         # Open and close cleanly
@@ -330,9 +323,7 @@ def test_realtime_graceful_close(omni_server, openai_client) -> None:
         # Verify server is still healthy with a new connection
         async with websockets.connect(ws_url) as ws:
             event = await _recv(ws, timeout=30.0)
-            assert event["type"] == "session.created", (
-                f"Server unhealthy after graceful close: {event}"
-            )
+            assert event["type"] == "session.created", f"Server unhealthy after graceful close: {event}"
 
     asyncio.run(_run())
 
@@ -359,8 +350,6 @@ def test_realtime_abnormal_disconnect(omni_server, openai_client) -> None:
         # Verify engine is still alive
         async with websockets.connect(ws_url) as ws2:
             event = await _recv(ws2, timeout=30.0)
-            assert event["type"] == "session.created", (
-                f"Server unhealthy after abnormal disconnect: {event}"
-            )
+            assert event["type"] == "session.created", f"Server unhealthy after abnormal disconnect: {event}"
 
     asyncio.run(_run())
