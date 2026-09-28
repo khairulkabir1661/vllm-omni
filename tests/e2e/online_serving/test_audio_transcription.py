@@ -55,9 +55,7 @@ def _transcribe(openai_client, model: str, file, **kwargs):
     """Call ``/v1/audio/transcriptions`` via the OpenAI SDK and return parsed JSON."""
     defaults = {"language": "en", "response_format": "text", "temperature": 0.0}
     defaults.update(kwargs)
-    result = openai_client.client.audio.transcriptions.create(
-        model=model, file=file, **defaults
-    )
+    result = openai_client.client.audio.transcriptions.create(model=model, file=file, **defaults)
     return json.loads(result)
 
 
@@ -106,9 +104,7 @@ def test_transcription_basic_english(omni_server, openai_client) -> None:
     assert "mary had a little lamb" in out["text"].lower(), (
         f"Expected 'mary had a little lamb' in output, got: {out['text']!r}"
     )
-    assert out["usage"]["seconds"] == 16, (
-        f"Expected 16s of audio, got {out['usage']['seconds']}s"
-    )
+    assert out["usage"]["seconds"] == 16, f"Expected 16s of audio, got {out['usage']['seconds']}s"
 
 
 @hardware_test(res={"cuda": "H100"}, num_cards=1)
@@ -142,12 +138,9 @@ def test_transcription_long_audio(omni_server, openai_client) -> None:
     text_lower = out["text"].lower()
     count = text_lower.count("mary")
     assert count >= 8, (
-        f"Expected 'mary' at least 8 times in 10x tiled audio, got {count}. "
-        f"Output: {out['text'][:200]!r}"
+        f"Expected 'mary' at least 8 times in 10x tiled audio, got {count}. Output: {out['text'][:200]!r}"
     )
-    assert out["usage"]["seconds"] == 161, (
-        f"Expected 161s usage for 10x tiled audio, got {out['usage']['seconds']}s"
-    )
+    assert out["usage"]["seconds"] == 161, f"Expected 161s usage for 10x tiled audio, got {out['usage']['seconds']}s"
 
 
 @hardware_test(res={"cuda": "H100"}, num_cards=1)
@@ -165,9 +158,7 @@ def test_transcription_batched(omni_server, openai_client) -> None:
 
     assert results[0]["text"].strip(), "Empty transcription for mary_had_lamb"
     assert results[1]["text"].strip(), "Empty transcription for winning_call"
-    assert "mary" in results[0]["text"].lower(), (
-        f"mary_had_lamb transcription missing 'mary': {results[0]['text']!r}"
-    )
+    assert "mary" in results[0]["text"].lower(), f"mary_had_lamb transcription missing 'mary': {results[0]['text']!r}"
 
 
 # ---- Streaming ----
@@ -198,7 +189,7 @@ def test_transcription_streaming(omni_server, openai_client) -> None:
         if not line:
             continue
         if line.startswith("data: "):
-            line = line[len("data: "):]
+            line = line[len("data: ") :]
         if line.strip() == "[DONE]":
             break
         chunk = json.loads(line)
@@ -207,9 +198,7 @@ def test_transcription_streaming(omni_server, openai_client) -> None:
             streamed_text += text
 
     assert streamed_text.strip(), "Streaming transcription returned empty text"
-    assert "mary" in streamed_text.lower(), (
-        f"Streaming output missing expected content: {streamed_text[:200]!r}"
-    )
+    assert "mary" in streamed_text.lower(), f"Streaming output missing expected content: {streamed_text[:200]!r}"
 
 
 @hardware_test(res={"cuda": "H100"}, num_cards=1)
@@ -237,7 +226,7 @@ def test_transcription_stream_usage(omni_server, openai_client) -> None:
     for line in resp.iter_lines(decode_unicode=True):
         if not line or not line.startswith("data: "):
             continue
-        payload = line[len("data: "):]
+        payload = line[len("data: ") :]
         if payload.strip() == "[DONE]":
             break
         chunk = json.loads(payload)
@@ -278,6 +267,5 @@ def test_transcription_max_tokens(omni_server, openai_client) -> None:
         )
     capped_out = json.loads(capped)
     assert len(capped_out["text"]) < len(full["text"]), (
-        f"Capped output not shorter than full. "
-        f"Capped: {capped_out['text']!r}, Full: {full['text'][:100]!r}"
+        f"Capped output not shorter than full. Capped: {capped_out['text']!r}, Full: {full['text'][:100]!r}"
     )
