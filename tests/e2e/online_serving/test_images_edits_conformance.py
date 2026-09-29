@@ -28,12 +28,12 @@ from tests.helpers.runtime import OmniServer, OmniServerParams, OnlineOmniClient
 
 pytestmark = [pytest.mark.slow, pytest.mark.diffusion]
 
-MODEL = "Qwen/Qwen-Image-Edit"
+MODEL = "meituan-longcat/LongCat-Image-Edit"
 
 _server_params = [
     pytest.param(
         OmniServerParams(model=MODEL),
-        id="qwen_image_edit",
+        id="longcat_image_edit",
         marks=hardware_marks(res={"cuda": "H100"}),
     ),
 ]
