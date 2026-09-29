@@ -12,6 +12,7 @@ From ``tests/``::
 
 from __future__ import annotations
 
+import io
 import os
 
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
@@ -23,6 +24,18 @@ from tests.helpers.mark import hardware_marks
 from tests.helpers.runtime import OmniServer, OmniServerParams, OnlineOmniClient
 
 pytestmark = [pytest.mark.slow, pytest.mark.omni]
+
+_ASR_PARAMS = [
+    pytest.param(
+        OmniServerParams(
+            model="openai/whisper-small",
+            server_args=["--enforce-eager"],
+            use_omni=False,
+        ),
+        id="whisper_small",
+        marks=hardware_marks(res={"cuda": "H100"}),
+    ),
+]
 
 _NON_ASR_PARAMS = [
     pytest.param(
@@ -41,6 +54,22 @@ def _get_audio_path(name: str = "mary_had_lamb") -> str:
     from vllm.assets.audio import AudioAsset
 
     return str(AudioAsset(name).get_local_path())
+
+
+@pytest.mark.parametrize("omni_server", _ASR_PARAMS, indirect=True)
+def test_translation_invalid_audio(
+    omni_server: OmniServer,
+    openai_client: OnlineOmniClient,
+) -> None:
+    """Corrupted audio data must be rejected with an error."""
+    invalid_audio = io.BytesIO(b"not a valid audio file")
+    invalid_audio.name = "invalid.wav"
+    with pytest.raises((openai.BadRequestError, openai.APIStatusError)):
+        openai_client.client.audio.translations.create(
+            model=omni_server.model,
+            file=invalid_audio,
+            temperature=0.0,
+        )
 
 
 @pytest.mark.parametrize("omni_server_function", _NON_ASR_PARAMS, indirect=True)
