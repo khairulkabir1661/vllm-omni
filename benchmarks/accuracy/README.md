@@ -7,6 +7,7 @@ Current integrations:
 
 - `text_to_image/`: GEBench generation + local judge scoring flow.
 - `image_to_image/`: GEdit-Bench generation + local VIEScore-style scoring flow.
+- `text_to_speech/`: Seed-TTS generation + WER/SIM/UTMOS evaluation.
 
 Design notes:
 
