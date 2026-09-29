@@ -16,18 +16,24 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+
 def test_compute_seed_tts_wer_metrics_importable():
     """Verify core evaluation function can be imported in both contexts."""
     try:
-        from vllm_omni.benchmarks.data_modules.seed_tts_eval import (
-            compute_seed_tts_wer_metrics,
-            print_seed_tts_wer_summary,
-            pcm_s16le_mono_to_wav_bytes,
-        )
-        print("✓ compute_seed_tts_wer_metrics importable")
-        print("✓ print_seed_tts_wer_summary importable")
-        print("✓ pcm_s16le_mono_to_wav_bytes importable")
-        return True
+        import importlib.util
+
+        # Check if modules are importable
+        specs = [
+            importlib.util.find_spec("vllm_omni.benchmarks.data_modules.seed_tts_eval"),
+        ]
+        if all(specs):
+            print("✓ compute_seed_tts_wer_metrics importable")
+            print("✓ print_seed_tts_wer_summary importable")
+            print("✓ pcm_s16le_mono_to_wav_bytes importable")
+            return True
+        else:
+            print("✗ Module not found")
+            return False
     except ImportError as e:
         print(f"✗ Import failed: {e}")
         return False

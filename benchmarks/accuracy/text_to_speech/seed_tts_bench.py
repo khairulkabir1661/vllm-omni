@@ -37,13 +37,13 @@ import argparse
 import asyncio
 import json
 import os
-import statistics
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import aiohttp
-import numpy as np
+
+from vllm_omni.benchmarks.data_modules.seed_tts_dataset import SeedTTSDataset
 
 # Import from seed_tts_eval for reusable logic
 from vllm_omni.benchmarks.data_modules.seed_tts_eval import (
@@ -51,7 +51,6 @@ from vllm_omni.benchmarks.data_modules.seed_tts_eval import (
     pcm_s16le_mono_to_wav_bytes,
     print_seed_tts_wer_summary,
 )
-from vllm_omni.benchmarks.data_modules.seed_tts_dataset import SeedTTSDataset
 
 
 def _utc_timestamp() -> str:
@@ -95,26 +94,32 @@ async def generate_tts_outputs(
 
                 async with session.post(endpoint, json=payload, timeout=aiohttp.ClientTimeout(total=300)) as resp:
                     if resp.status != 200:
-                        results["failed"].append({
-                            "index": i,
-                            "prompt": prompt,
-                            "error": f"HTTP {resp.status}",
-                        })
+                        results["failed"].append(
+                            {
+                                "index": i,
+                                "prompt": prompt,
+                                "error": f"HTTP {resp.status}",
+                            }
+                        )
                         continue
 
                     audio_bytes = await resp.read()
-                    results["generated"].append({
+                    results["generated"].append(
+                        {
+                            "index": i,
+                            "prompt": prompt,
+                            "audio_bytes": audio_bytes,
+                            "audio_path": None,  # Will be set when saved
+                        }
+                    )
+            except Exception as e:
+                results["failed"].append(
+                    {
                         "index": i,
                         "prompt": prompt,
-                        "audio_bytes": audio_bytes,
-                        "audio_path": None,  # Will be set when saved
-                    })
-            except Exception as e:
-                results["failed"].append({
-                    "index": i,
-                    "prompt": prompt,
-                    "error": str(e),
-                })
+                        "error": str(e),
+                    }
+                )
 
     return results
 
@@ -164,11 +169,13 @@ def evaluate_generated_audio(
     for item in outputs.get("generated", []):
         # In standalone script, we only have synthesized audio
         # In real scenario, would have reference_audio_path from dataset
-        eval_items.append({
-            "prompt": item["prompt"],
-            "audio_path": item["audio_path"],
-            "reference_audio_path": reference_paths.get(item["index"]),
-        })
+        eval_items.append(
+            {
+                "prompt": item["prompt"],
+                "audio_path": item["audio_path"],
+                "reference_audio_path": reference_paths.get(item["index"]),
+            }
+        )
 
     # Call core evaluation logic from seed_tts_eval.py
     metrics = compute_seed_tts_wer_metrics(
@@ -242,7 +249,7 @@ async def main() -> None:
     if args.eval_device:
         os.environ["SEED_TTS_EVAL_DEVICE"] = args.eval_device
 
-    print(f"Generating TTS outputs...")
+    print("Generating TTS outputs...")
     print(f"  Model: {args.model}")
     print(f"  Server: {base_url}")
     print(f"  Locale: {args.locale}")
@@ -251,6 +258,7 @@ async def main() -> None:
     # Load prompts from dataset
     try:
         from vllm_omni.benchmarks.data_modules.seed_tts_dataset import resolve_seed_tts_root
+
         dataset_root = resolve_seed_tts_root(args.dataset_path, locale=args.locale)
         dataset = SeedTTSDataset(
             dataset_root=dataset_root,
@@ -260,7 +268,7 @@ async def main() -> None:
         prompts = [req.prompt for req in dataset.sample(None, num_requests=args.num_prompts or 10)]
     except Exception as e:
         print(f"  Warning: Could not load real Seed-TTS dataset: {e}")
-        print(f"  Using random prompts instead")
+        print("  Using random prompts instead")
         prompts = [
             "Hello, this is a test sentence.",
             "The quick brown fox jumps over the lazy dog.",
@@ -279,14 +287,14 @@ async def main() -> None:
     print(f"  Saved audio to {output_dir / 'audio'}")
 
     # Evaluate
-    print(f"Evaluating with WER/SIM/UTMOS...")
+    print("Evaluating with WER/SIM/UTMOS...")
     metrics = evaluate_generated_audio(outputs, args.locale)
 
     # Summarize
     summary = summarize_results(metrics, output_dir)
 
     # Print results
-    print(f"\nResults:")
+    print("\nResults:")
     print_seed_tts_wer_summary(metrics)
 
     # Save summary
