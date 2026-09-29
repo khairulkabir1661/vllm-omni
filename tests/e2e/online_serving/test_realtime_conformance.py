@@ -26,24 +26,22 @@ from vllm.multimodal.media.audio import load_audio
 
 from tests.helpers.mark import hardware_marks, hardware_test
 from tests.helpers.runtime import OmniServerParams
+from tests.helpers.stage_config import get_deploy_config_path
 
 pytestmark = [pytest.mark.slow, pytest.mark.omni]
 
-MODEL = "OpenMOSS-Team/MOSS-TTS-Realtime"
+MODEL = "nvidia/Nemotron-Labs-Audex-2B"
 
 _server_params = [
     pytest.param(
         OmniServerParams(
             model=MODEL,
-            server_args=[
-                "--enforce-eager",
-                "--max-model-len",
-                "2048",
-            ],
+            stage_config_path=get_deploy_config_path("audex_s2s.yaml"),
+            server_args=["--trust-remote-code"],
             env_dict={"VLLM_ENGINE_ITERATION_TIMEOUT_S": "600"},
             use_omni=True,
         ),
-        id="moss_tts_realtime",
+        id="audex_s2s_realtime",
         marks=hardware_marks(res={"cuda": "H100"}),
     ),
 ]
