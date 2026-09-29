@@ -25,15 +25,20 @@ from PIL import Image
 
 from tests.helpers.mark import hardware_marks
 from tests.helpers.runtime import OmniServer, OmniServerParams, OnlineOmniClient
+from tests.helpers.stage_config import get_deploy_config_path
 
 pytestmark = [pytest.mark.slow, pytest.mark.diffusion]
 
-MODEL = "meituan-longcat/LongCat-Image-Edit"
+MODEL = "THUDM/GLM-Image-Mini"
 
 _server_params = [
     pytest.param(
-        OmniServerParams(model=MODEL),
-        id="longcat_image_edit",
+        OmniServerParams(
+            model=MODEL,
+            stage_config_path=get_deploy_config_path("glm_image.yaml"),
+            server_args=["--trust-remote-code"],
+        ),
+        id="glm_image_edit",
         marks=hardware_marks(res={"cuda": "H100"}),
     ),
 ]
