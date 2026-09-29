@@ -29,15 +29,7 @@ from tests.helpers.runtime import OmniServerParams
 
 pytestmark = [pytest.mark.slow, pytest.mark.omni]
 
-MODEL = "mistralai/Voxtral-Mini-4B-Realtime-2602"
-MISTRAL_ARGS = [
-    "--tokenizer_mode",
-    "mistral",
-    "--config_format",
-    "mistral",
-    "--load_format",
-    "mistral",
-]
+MODEL = "OpenMOSS-Team/MOSS-TTS-Realtime"
 
 _server_params = [
     pytest.param(
@@ -47,12 +39,11 @@ _server_params = [
                 "--enforce-eager",
                 "--max-model-len",
                 "2048",
-                *MISTRAL_ARGS,
             ],
             env_dict={"VLLM_ENGINE_ITERATION_TIMEOUT_S": "600"},
             use_omni=True,
         ),
-        id="voxtral_realtime",
+        id="moss_tts_realtime",
         marks=hardware_marks(res={"cuda": "H100"}),
     ),
 ]
