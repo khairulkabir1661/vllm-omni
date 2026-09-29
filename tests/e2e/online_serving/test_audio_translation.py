@@ -19,6 +19,7 @@ import os
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 import numpy as np
+import openai
 import pytest
 import requests
 import soundfile as sf
@@ -241,3 +242,20 @@ def test_translation_max_tokens(omni_server, openai_client) -> None:
     assert len(capped_out["text"]) < len(full_out["text"]), (
         f"Capped output not shorter than full. Capped: {capped_out['text']!r}, Full: {full_out['text'][:100]!r}"
     )
+
+
+# ---- Error handling ----
+
+
+@hardware_test(res={"cuda": "H100"}, num_cards=1)
+@pytest.mark.parametrize("omni_server", _server_params, indirect=True)
+def test_translation_invalid_audio(omni_server, openai_client) -> None:
+    """Corrupted audio data must be rejected with an error."""
+    invalid_audio = io.BytesIO(b"not a valid audio file")
+    invalid_audio.name = "invalid.wav"
+    with pytest.raises((openai.BadRequestError, openai.APIStatusError)):
+        openai_client.client.audio.translations.create(
+            model=omni_server.model,
+            file=invalid_audio,
+            temperature=0.0,
+        )
