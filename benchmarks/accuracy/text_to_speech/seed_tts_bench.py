@@ -51,10 +51,7 @@ from vllm_omni.benchmarks.data_modules.seed_tts_eval import (
     pcm_s16le_mono_to_wav_bytes,
     print_seed_tts_wer_summary,
 )
-from vllm_omni.benchmarks.data_modules.seed_tts_dataset import (
-    DEFAULT_SEED_TTS_DATA_ROOT,
-    get_seed_tts_paths_and_prompts,
-)
+from vllm_omni.benchmarks.data_modules.seed_tts_dataset import SeedTTSDataset
 
 
 def _utc_timestamp() -> str:
@@ -251,10 +248,25 @@ async def main() -> None:
     print(f"  Locale: {args.locale}")
     print(f"  Output: {output_dir}")
 
-    # Load prompts
-    dataset_path = args.dataset_path or DEFAULT_SEED_TTS_DATA_ROOT
-    prompts_and_paths = get_seed_tts_paths_and_prompts(dataset_path, args.locale, args.num_prompts)
-    prompts = [p for p, _ in prompts_and_paths]
+    # Load prompts from dataset
+    try:
+        from vllm_omni.benchmarks.data_modules.seed_tts_dataset import resolve_seed_tts_root
+        dataset_root = resolve_seed_tts_root(args.dataset_path, locale=args.locale)
+        dataset = SeedTTSDataset(
+            dataset_root=dataset_root,
+            locale=args.locale,
+            num_requests=args.num_prompts,
+        )
+        prompts = [req.prompt for req in dataset.sample(None, num_requests=args.num_prompts or 10)]
+    except Exception as e:
+        print(f"  Warning: Could not load real Seed-TTS dataset: {e}")
+        print(f"  Using random prompts instead")
+        prompts = [
+            "Hello, this is a test sentence.",
+            "The quick brown fox jumps over the lazy dog.",
+            "Please tell me a story about a magical forest.",
+        ] * ((args.num_prompts or 10) // 3 + 1)
+        prompts = prompts[: args.num_prompts or 10]
 
     print(f"  Prompts: {len(prompts)}")
 
