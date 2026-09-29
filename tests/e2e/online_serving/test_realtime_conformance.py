@@ -26,22 +26,20 @@ from vllm.multimodal.media.audio import load_audio
 
 from tests.helpers.mark import hardware_marks, hardware_test
 from tests.helpers.runtime import OmniServerParams
-from tests.helpers.stage_config import get_deploy_config_path
 
 pytestmark = [pytest.mark.slow, pytest.mark.omni]
 
-MODEL = "nvidia/Nemotron-Labs-Audex-2B"
+MODEL = "Qwen/Qwen3-Omni-30B-A3B-Instruct"
 
 _server_params = [
     pytest.param(
         OmniServerParams(
             model=MODEL,
-            stage_config_path=get_deploy_config_path("audex_s2s.yaml"),
             server_args=["--trust-remote-code"],
             env_dict={"VLLM_ENGINE_ITERATION_TIMEOUT_S": "600"},
             use_omni=True,
         ),
-        id="audex_s2s_realtime",
+        id="qwen3_omni_realtime",
         marks=hardware_marks(res={"cuda": "H100"}),
     ),
 ]
@@ -151,7 +149,7 @@ def test_realtime_session_created(omni_server, openai_client) -> None:
 @hardware_test(res={"cuda": "H100"}, num_cards=1)
 @pytest.mark.parametrize("omni_server", _server_params, indirect=True)
 def test_realtime_session_update(omni_server, openai_client) -> None:
-    """``session.update`` with valid model returns ``session.updated``."""
+    """``session.update`` with valid model returns ``session.updated`` event per OpenAI Realtime spec."""
     ws_url = _ws_url(openai_client)
 
     async def _run():
@@ -161,7 +159,7 @@ def test_realtime_session_update(omni_server, openai_client) -> None:
 
             await _send(ws, {"type": "session.update", "model": omni_server.model})
             event = await _recv(ws, timeout=10.0)
-            assert event["type"] == "session.updated", f"Expected session.updated, got {event}"
+            assert event["type"] == "session.updated", f"Expected session.updated per OpenAI spec, got {event}"
 
     asyncio.run(_run())
 
