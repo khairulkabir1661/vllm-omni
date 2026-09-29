@@ -38,8 +38,12 @@ class RealtimeConnection(VllmRealtimeConnection):
         """Override to emit session.updated and handle empty final commits gracefully."""
         event_type = event.get("type")
         # Only intercept empty FINAL commits if model IS validated (avoid engine crash)
-        if (event_type == "input_audio_buffer.commit" and self._is_model_validated
-            and self.audio_queue.empty() and event.get("final")):
+        if (
+            event_type == "input_audio_buffer.commit"
+            and self._is_model_validated
+            and self.audio_queue.empty()
+            and event.get("final")
+        ):
             await self.send_json({"type": "transcription.done", "text": ""})
             return
         # All other events go through parent, then emit session.updated if applicable
