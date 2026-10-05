@@ -47,7 +47,7 @@ from vllm_omni.diffusion.models.ming_flash_omni.condition_encoder import (
 from vllm_omni.diffusion.models.ming_flash_omni.ming_zimage_transformer import (
     MingZImageTransformer2DModel,
 )
-from vllm_omni.diffusion.models.utils import load_vae_scale_factor
+from vllm_omni.diffusion.models.utils import load_vae_scale_factor, vae_scale_factor_from_vae
 from vllm_omni.diffusion.models.z_image.pipeline_z_image import ZImagePipeline
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.diffusion.worker.request_batch import DiffusionRequestBatch
@@ -162,7 +162,7 @@ class MingImagePipeline(ZImagePipeline):
         self.text_encoder = None
         self.tokenizer = None
 
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
+        self.vae_scale_factor = vae_scale_factor_from_vae(self.vae)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor * 2, do_convert_rgb=True)
         self.setup_diffusion_pipeline_profiler(
             enable_diffusion_pipeline_profiler=getattr(od_config, "enable_diffusion_pipeline_profiler", False)

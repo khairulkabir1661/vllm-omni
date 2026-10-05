@@ -281,3 +281,27 @@ def load_vae_scale_factor(
     if channels is None:
         return default
     return 2 ** (len(channels) + exponent_offset)
+
+
+def vae_scale_factor_from_vae(
+    vae: torch.nn.Module | None,
+    *,
+    config_key: str = "block_out_channels",
+    exponent_offset: int = -1,
+    default: int = 8,
+) -> int:
+    """Compute the VAE spatial downsampling factor from a loaded VAE.
+
+    Looks for *config_key* on ``vae.config`` (diffusers-style) first, then
+    directly on *vae* (custom VAEs like Krea2/Qwen that expose the list as
+    an attribute).  Returns *default* when the VAE is ``None`` or the key
+    is absent.
+    """
+    if vae is None:
+        return default
+    channels = getattr(getattr(vae, "config", None), config_key, None)
+    if channels is None:
+        channels = getattr(vae, config_key, None)
+    if channels is None:
+        return default
+    return 2 ** (len(channels) + exponent_offset)

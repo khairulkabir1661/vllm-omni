@@ -3,7 +3,7 @@
 
 import json
 
-from vllm_omni.diffusion.models.utils import load_vae_scale_factor
+from vllm_omni.diffusion.models.utils import load_vae_scale_factor, vae_scale_factor_from_vae
 
 
 def _make_vae_config(tmp_path, data):
@@ -36,3 +36,41 @@ def test_missing_config_returns_default(tmp_path):
 def test_missing_key_returns_default(tmp_path):
     path = _make_vae_config(tmp_path, {"other_key": "value"})
     assert load_vae_scale_factor(path) == 8
+
+
+class _FakeConfig:
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+
+class _FakeVAE:
+    def __init__(self, config=None, **kwargs):
+        self.config = config
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+
+def test_from_vae_standard():
+    vae = _FakeVAE(config=_FakeConfig(block_out_channels=[128, 256, 512, 512]))
+    assert vae_scale_factor_from_vae(vae) == 8
+
+
+def test_from_vae_temporal():
+    vae = _FakeVAE(temperal_downsample=[True, True, True])
+    assert vae_scale_factor_from_vae(vae, config_key="temperal_downsample", exponent_offset=0) == 8
+
+
+def test_from_vae_ernie():
+    vae = _FakeVAE(config=_FakeConfig(block_out_channels=[128, 256, 512, 512]))
+    assert vae_scale_factor_from_vae(vae, exponent_offset=0, default=16) == 16
+
+
+def test_from_vae_none():
+    assert vae_scale_factor_from_vae(None) == 8
+    assert vae_scale_factor_from_vae(None, default=16) == 16
+
+
+def test_from_vae_missing_key():
+    vae = _FakeVAE(config=_FakeConfig())
+    assert vae_scale_factor_from_vae(vae) == 8
