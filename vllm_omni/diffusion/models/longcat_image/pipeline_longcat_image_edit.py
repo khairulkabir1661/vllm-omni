@@ -34,7 +34,7 @@ from vllm_omni.diffusion.models.longcat_image.longcat_image_transformer import (
     LongCatImageTransformer2DModel,
 )
 from vllm_omni.diffusion.models.longcat_image.pipeline_longcat_image import calculate_shift
-from vllm_omni.diffusion.models.utils import _load_json, load_vae_scale_factor
+from vllm_omni.diffusion.models.utils import _load_json, load_vae_scale_factor, vae_scale_factor_from_vae
 from vllm_omni.diffusion.profiler.diffusion_pipeline_profiler import DiffusionPipelineProfilerMixin
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.diffusion.utils.size_utils import normalize_min_aligned_size
@@ -274,7 +274,7 @@ class LongCatImageEditPipeline(
         self.transformer = LongCatImageTransformer2DModel(od_config=od_config)
         self.tokenizer = AutoTokenizer.from_pretrained(model, subfolder="tokenizer", local_files_only=local_files_only)
 
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = vae_scale_factor_from_vae(getattr(self, "vae", None))
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor * 2)
         self.image_processor_vl = self.text_processor.image_processor
         self.latent_channels = self.vae.config.get("latent_channels", 16)

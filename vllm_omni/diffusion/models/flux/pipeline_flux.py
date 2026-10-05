@@ -30,7 +30,7 @@ from vllm_omni.diffusion.models.flux import FluxTransformer2DModel
 from vllm_omni.diffusion.models.flux.flux_pipeline_mixin import FluxPipelineMixin
 from vllm_omni.diffusion.models.interface import SupportsComponentDiscovery
 from vllm_omni.diffusion.models.t5_encoder import T5EncoderModel
-from vllm_omni.diffusion.models.utils import init_parameters, load_vae_scale_factor, recursive_replace_linear
+from vllm_omni.diffusion.models.utils import init_parameters, load_vae_scale_factor, recursive_replace_linear, vae_scale_factor_from_vae
 from vllm_omni.diffusion.profiler.diffusion_pipeline_profiler import DiffusionPipelineProfilerMixin
 from vllm_omni.diffusion.utils.tf_utils import get_transformer_config_kwargs
 from vllm_omni.diffusion.worker.request_batch import DiffusionRequestBatch
@@ -141,7 +141,7 @@ class FluxPipeline(
 
         self.stage = None
 
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = vae_scale_factor_from_vae(getattr(self, "vae", None))
         # Flux latents are turned into 2x2 patches and packed.
         # This means the latent width and height has to be divisible
         # by the patch size. So the vae scale factor is multiplied by the patch size to account for this
