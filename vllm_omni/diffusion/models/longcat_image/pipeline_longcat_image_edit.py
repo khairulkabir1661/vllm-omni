@@ -31,6 +31,7 @@ from vllm_omni.diffusion.distributed.utils import get_local_device
 from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
 from vllm_omni.diffusion.model_loader.hub_prefetch import from_pretrained_with_prefetch, prefetch_subfolders
 from vllm_omni.diffusion.models.interface import SupportImageInput, SupportsComponentDiscovery
+from vllm_omni.diffusion.models.utils import load_vae_scale_factor
 from vllm_omni.diffusion.models.longcat_image.longcat_image_transformer import (
     LongCatImageTransformer2DModel,
 )
@@ -56,12 +57,12 @@ def get_longcat_image_edit_pre_process_func(
         model_path = model_name
     else:
         model_path = download_weights_from_hf_specific(model_name, None, ["*"])
+    vae_scale_factor = load_vae_scale_factor(model_path)
+
+    image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor * 2)
     vae_config_path = os.path.join(model_path, "vae/config.json")
     with open(vae_config_path) as f:
         vae_config = json.load(f)
-        vae_scale_factor = 2 ** (len(vae_config["block_out_channels"]) - 1) if "block_out_channels" in vae_config else 8
-
-    image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor * 2)
     latent_channels = vae_config.get("latent_channels", 16)
 
     def pre_process_func(
@@ -122,10 +123,7 @@ def get_longcat_image_post_process_func(
         model_path = model_name
     else:
         model_path = download_weights_from_hf_specific(model_name, None, ["*"])
-    vae_config_path = os.path.join(model_path, "vae/config.json")
-    with open(vae_config_path) as f:
-        vae_config = json.load(f)
-        vae_scale_factor = 2 ** (len(vae_config["block_out_channels"]) - 1) if "block_out_channels" in vae_config else 8
+    vae_scale_factor = load_vae_scale_factor(model_path)
 
     image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor * 2)
 
