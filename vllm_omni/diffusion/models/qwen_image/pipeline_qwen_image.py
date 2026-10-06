@@ -361,7 +361,9 @@ class QwenImagePipeline(
         self.stage = None
 
         self.vae_scale_factor = vae_scale_factor_from_vae(
-            getattr(self, "vae", None), config_key="temperal_downsample", exponent_offset=0,
+            getattr(self, "vae", None),
+            config_key="temperal_downsample",
+            exponent_offset=0,
         )
         # QwenImage latents are turned into 2x2 patches and packed.
         # This means the latent width and height has to be divisible

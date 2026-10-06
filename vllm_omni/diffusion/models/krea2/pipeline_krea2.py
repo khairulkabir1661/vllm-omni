@@ -210,7 +210,9 @@ class Krea2Pipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin,
         self.tokenizer = AutoTokenizer.from_pretrained(model, subfolder="tokenizer", local_files_only=local_files_only)
 
         self.vae_scale_factor = vae_scale_factor_from_vae(
-            getattr(self, "vae", None), config_key="temperal_downsample", exponent_offset=0,
+            getattr(self, "vae", None),
+            config_key="temperal_downsample",
+            exponent_offset=0,
         )
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor * self.patch_size)
         self.default_sample_size = 1024

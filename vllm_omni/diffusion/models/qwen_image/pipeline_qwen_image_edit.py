@@ -297,7 +297,9 @@ class QwenImageEditPipeline(
         self.stage = None
 
         self.vae_scale_factor = vae_scale_factor_from_vae(
-            getattr(self, "vae", None), config_key="temperal_downsample", exponent_offset=0,
+            getattr(self, "vae", None),
+            config_key="temperal_downsample",
+            exponent_offset=0,
         )
         self.latent_channels = self.vae.config.z_dim if getattr(self, "vae", None) else 16
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor * 2, do_convert_rgb=True)
