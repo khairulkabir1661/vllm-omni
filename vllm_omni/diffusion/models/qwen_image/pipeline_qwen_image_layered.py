@@ -283,7 +283,9 @@ class QwenImageLayeredPipeline(
 
         # Pipeline configuration & processing parameters
         self.vae_scale_factor = vae_scale_factor_from_vae(
-            getattr(self, "vae", None), config_key="temperal_downsample", exponent_offset=0,
+            getattr(self, "vae", None),
+            config_key="temperal_downsample",
+            exponent_offset=0,
         )
         self.latent_channels = self.vae.config.z_dim if getattr(self, "vae", None) else 16
         # QwenImage latents are turned into 2x2 patches and packed.
