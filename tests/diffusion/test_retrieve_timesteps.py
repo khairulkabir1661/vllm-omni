@@ -13,8 +13,7 @@ class FakeScheduler:
     def __init__(self):
         self.timesteps = None
 
-    def set_timesteps(self, num_inference_steps=None, *, device=None,
-                      timesteps=None, sigmas=None, **kwargs):
+    def set_timesteps(self, num_inference_steps=None, *, device=None, timesteps=None, sigmas=None, **kwargs):
         if timesteps is not None:
             self.timesteps = torch.tensor(timesteps, dtype=torch.float32)
         elif sigmas is not None:
@@ -29,8 +28,7 @@ class FakeSchedulerNoTimesteps(FakeScheduler):
 
 
 class FakeSchedulerNoSigmas(FakeScheduler):
-    def set_timesteps(self, num_inference_steps=None, *, device=None,
-                      timesteps=None, **kwargs):
+    def set_timesteps(self, num_inference_steps=None, *, device=None, timesteps=None, **kwargs):
         if timesteps is not None:
             self.timesteps = torch.tensor(timesteps, dtype=torch.float32)
         else:
