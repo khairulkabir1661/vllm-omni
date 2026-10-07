@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-import json
 import math
 import os
 import re
@@ -35,7 +34,7 @@ from vllm_omni.diffusion.models.longcat_image.longcat_image_transformer import (
     LongCatImageTransformer2DModel,
 )
 from vllm_omni.diffusion.models.longcat_image.pipeline_longcat_image import calculate_shift
-from vllm_omni.diffusion.models.utils import load_vae_scale_factor
+from vllm_omni.diffusion.models.utils import _load_json, load_vae_scale_factor
 from vllm_omni.diffusion.profiler.diffusion_pipeline_profiler import DiffusionPipelineProfilerMixin
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.diffusion.utils.size_utils import normalize_min_aligned_size
@@ -60,9 +59,7 @@ def get_longcat_image_edit_pre_process_func(
     vae_scale_factor = load_vae_scale_factor(model_path)
 
     image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor * 2)
-    vae_config_path = os.path.join(model_path, "vae/config.json")
-    with open(vae_config_path) as f:
-        vae_config = json.load(f)
+    vae_config = _load_json(model_path, "vae/config.json")
     latent_channels = vae_config.get("latent_channels", 16)
 
     def pre_process_func(
