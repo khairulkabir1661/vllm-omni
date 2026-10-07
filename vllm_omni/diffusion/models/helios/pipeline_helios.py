@@ -355,9 +355,7 @@ class HeliosPipeline(
         )
         batch_size = prompt_embeds.shape[0]
 
-        latents_mean, latents_std = vae_latent_mean_std(
-            self.vae.config, device=self.vae.device, dtype=self.vae.dtype
-        )
+        latents_mean, latents_std = vae_latent_mean_std(self.vae.config, device=self.vae.device, dtype=self.vae.dtype)
         latents_std = 1.0 / latents_std
 
         add_noise_to_image_latents = bool(extra.get("add_noise_to_image_latents", True))
@@ -1053,9 +1051,7 @@ class HeliosPipeline(
 
         history_sizes = sorted(history_sizes, reverse=True)
 
-        latents_mean, latents_std = vae_latent_mean_std(
-            self.vae.config, device=self.vae.device, dtype=self.vae.dtype
-        )
+        latents_mean, latents_std = vae_latent_mean_std(self.vae.config, device=self.vae.device, dtype=self.vae.dtype)
         latents_std = 1.0 / latents_std
 
         # Prepare I2V image latents

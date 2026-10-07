@@ -37,9 +37,7 @@ def test_roundtrip_5d():
 
 def test_roundtrip_4d():
     original = torch.randn(2, 4, 8, 8)
-    recovered = denormalize_latents(
-        normalize_latents(original, CONFIG, ndim=4), CONFIG, ndim=4
-    )
+    recovered = denormalize_latents(normalize_latents(original, CONFIG, ndim=4), CONFIG, ndim=4)
     assert torch.allclose(original, recovered, atol=1e-6)
 
 

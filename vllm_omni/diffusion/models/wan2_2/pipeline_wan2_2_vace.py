@@ -416,9 +416,7 @@ class Wan22VACEPipeline(Wan22Pipeline, SupportImageInput):
         """
         vae_dtype = self.vae.dtype
 
-        latents_mean, latents_std = vae_latent_mean_std(
-            self.vae.config, device=device, dtype=torch.float32
-        )
+        latents_mean, latents_std = vae_latent_mean_std(self.vae.config, device=device, dtype=torch.float32)
 
         # Binarize mask
         mask = torch.where(mask > 0.5, 1.0, 0.0).to(dtype=vae_dtype)
