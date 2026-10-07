@@ -41,7 +41,7 @@ from vllm_omni.diffusion.models.dmd2 import DMD2PipelineMixin
 from vllm_omni.diffusion.models.interface import SupportsComponentDiscovery, role_loads_component
 from vllm_omni.diffusion.models.progress_bar import ProgressBarMixin, _is_rank_zero
 from vllm_omni.diffusion.models.schedulers import FlowUniPCMultistepScheduler
-from vllm_omni.diffusion.models.utils import denormalize_latents, normalize_latents
+from vllm_omni.diffusion.models.utils import denormalize_latents
 from vllm_omni.diffusion.models.wan2_2.chunked_mp4 import (
     resolve_wan_output_fps,
     resolve_wan_preencode_batch_frames,
