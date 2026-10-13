@@ -4,9 +4,11 @@
 """Tests for diffusion benchmark tokenizer bypass (Issue #6873)."""
 
 from argparse import Namespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
+
+from vllm.benchmarks.serve import ASYNC_REQUEST_FUNCS
 
 from vllm_omni.benchmarks.serve import (
     _DIFFUSION_BACKENDS,
@@ -21,6 +23,12 @@ pytestmark = [
     pytest.mark.diffusion,
     pytest.mark.cpu,
 ]
+
+
+def test_diffusion_backends_are_registered():
+    """Every _DIFFUSION_BACKENDS entry must exist in ASYNC_REQUEST_FUNCS."""
+    for backend in _DIFFUSION_BACKENDS:
+        assert backend in ASYNC_REQUEST_FUNCS, f"{backend!r} not registered in patch.py"
 
 
 @pytest.mark.parametrize("endpoint", sorted(_DIFFUSION_ENDPOINTS))
@@ -63,6 +71,7 @@ def test_prepare_diffusion_args_respects_explicit_tokenizer():
 
 
 def _make_bench_args(**overrides):
+    """Build a minimal Namespace that survives up to the tokenizer check in upstream main_async."""
     defaults = dict(
         endpoint="/v1/images/generations",
         backend="",
@@ -75,44 +84,49 @@ def _make_bench_args(**overrides):
         extra_body=None,
         dataset_name=None,
         tokenizer=None,
+        tokenizer_mode="auto",
+        trust_remote_code=False,
+        # Fields needed by upstream main_async before the tokenizer check
+        max_concurrency=None,
+        seed=0,
+        plot_timeline=False,
+        ramp_up_strategy=None,
+        base_url="http://localhost:8000",
+        model="test-model",
+        served_model_name="test-model",
+        skip_tokenizer_init=False,
+        header=None,
+        insecure=False,
+        label=None,
     )
     defaults.update(overrides)
     return Namespace(**defaults)
 
 
-def test_main_sets_skip_tokenizer_for_diffusion():
+def test_main_skips_tokenizer_init_for_diffusion():
+    """Verify get_tokenizer is never called when main routes a diffusion endpoint."""
     args = _make_bench_args()
-    with patch(
-        "vllm_omni.benchmarks.serve.main_async",
-        new_callable=AsyncMock,
-        return_value={"ok": True},
-    ) as mock:
-        result = main(args)
-        assert mock.called
-        assert result == {"ok": True}
-        called_args = mock.call_args[0][0]
-        assert called_args.skip_tokenizer_init is True
+    with patch("vllm.benchmarks.serve.get_tokenizer") as mock_tokenizer:
+        mock_tokenizer.side_effect = AssertionError("get_tokenizer should not be called")
+        with pytest.raises(ValueError, match="dataset-name"):
+            main(args)
+    mock_tokenizer.assert_not_called()
 
 
 def test_main_does_not_skip_tokenizer_when_explicit():
+    """With --tokenizer set, get_tokenizer must be called even for diffusion endpoints."""
     args = _make_bench_args(tokenizer="gpt2")
-    with patch(
-        "vllm_omni.benchmarks.serve.main_async",
-        new_callable=AsyncMock,
-        return_value={"ok": True},
-    ) as mock:
-        main(args)
-        called_args = mock.call_args[0][0]
-        assert not getattr(called_args, "skip_tokenizer_init", False)
+    with patch("vllm.benchmarks.serve.get_tokenizer", return_value="fake") as mock_tokenizer:
+        with pytest.raises(ValueError, match="dataset-name"):
+            main(args)
+    mock_tokenizer.assert_called_once()
 
 
-def test_main_slashless_endpoint_sets_skip_tokenizer():
+def test_main_slashless_endpoint_skips_tokenizer():
+    """Slashless endpoints like 'v1/videos' must also bypass tokenizer init."""
     args = _make_bench_args(endpoint="v1/videos")
-    with patch(
-        "vllm_omni.benchmarks.serve.main_async",
-        new_callable=AsyncMock,
-        return_value={"ok": True},
-    ) as mock:
-        main(args)
-        called_args = mock.call_args[0][0]
-        assert called_args.skip_tokenizer_init is True
+    with patch("vllm.benchmarks.serve.get_tokenizer") as mock_tokenizer:
+        mock_tokenizer.side_effect = AssertionError("get_tokenizer should not be called")
+        with pytest.raises(ValueError, match="dataset-name"):
+            main(args)
+    mock_tokenizer.assert_not_called()
