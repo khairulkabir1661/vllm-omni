@@ -263,21 +263,7 @@ def add_multi_stage_cli_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-_DIFFUSION_ENDPOINTS = frozenset(
-    {
-        "/v1/images/generations",
-        "/v1/images/edits",
-        "/v1/videos",
-    }
-)
-
-_DIFFUSION_BACKENDS = frozenset(
-    {
-        "openai-image-gen-omni",
-        "openai-image-edits-omni",
-        "openai-video-omni",
-    }
-)
+from vllm_omni.benchmarks.serve import is_diffusion_benchmark
 
 _DIFFUSION_TASK_TO_ENDPOINT = {
     "t2i": "/v1/images/generations",
@@ -285,19 +271,6 @@ _DIFFUSION_TASK_TO_ENDPOINT = {
     "t2v": "/v1/videos",
     "i2v": "/v1/videos",
 }
-
-_ENDPOINT_TO_BACKEND = {
-    "/v1/images/generations": "openai-image-gen-omni",
-    "/v1/images/edits": "openai-image-edits-omni",
-    "/v1/videos": "openai-video-omni",
-}
-
-
-def is_diffusion_benchmark(args) -> bool:
-    """Return True when the benchmark targets a diffusion/image/video endpoint."""
-    endpoint = getattr(args, "endpoint", None) or ""
-    backend = getattr(args, "backend", None) or ""
-    return endpoint in _DIFFUSION_ENDPOINTS or backend in _DIFFUSION_BACKENDS
 
 
 def add_diffusion_cli_args(parser: argparse.ArgumentParser) -> None:
@@ -691,15 +664,8 @@ def _preprocess_diffusion_args(args: argparse.Namespace) -> None:
     if task is None and not is_diffusion_benchmark(args):
         return
 
-    endpoint = getattr(args, "endpoint", None)
-    backend = getattr(args, "backend", None)
-
-    if task and not endpoint:
+    if task and not getattr(args, "endpoint", None):
         args.endpoint = _DIFFUSION_TASK_TO_ENDPOINT[task]
-        endpoint = args.endpoint
-
-    if endpoint and endpoint in _ENDPOINT_TO_BACKEND and not backend:
-        args.backend = _ENDPOINT_TO_BACKEND[endpoint]
 
 
 def preprocess_serve_args(args: argparse.Namespace) -> None:
