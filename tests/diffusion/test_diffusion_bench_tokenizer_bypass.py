@@ -9,18 +9,33 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from vllm_omni.benchmarks.serve import (
+    _DIFFUSION_BACKENDS,
+    _DIFFUSION_ENDPOINTS,
     _prepare_diffusion_args,
     is_diffusion_benchmark,
     main,
 )
 
-DIFFUSION_ENDPOINTS = ["/v1/images/generations", "/v1/images/edits", "/v1/videos"]
-DIFFUSION_BACKENDS = ["openai-image-gen-omni", "openai-image-edits-omni", "openai-video-omni"]
+pytestmark = [
+    pytest.mark.core_model,
+    pytest.mark.diffusion,
+    pytest.mark.cpu,
+]
 
 
-@pytest.mark.parametrize("endpoint", DIFFUSION_ENDPOINTS)
+@pytest.mark.parametrize("endpoint", sorted(_DIFFUSION_ENDPOINTS))
 def test_diffusion_endpoints_detected(endpoint):
     assert is_diffusion_benchmark(Namespace(endpoint=endpoint, backend=""))
+
+
+@pytest.mark.parametrize("endpoint", sorted(_DIFFUSION_ENDPOINTS))
+def test_diffusion_endpoints_detected_without_leading_slash(endpoint):
+    assert is_diffusion_benchmark(Namespace(endpoint=endpoint.lstrip("/"), backend=""))
+
+
+@pytest.mark.parametrize("backend", sorted(_DIFFUSION_BACKENDS))
+def test_diffusion_backends_detected(backend):
+    assert is_diffusion_benchmark(Namespace(endpoint="", backend=backend))
 
 
 @pytest.mark.parametrize(
@@ -41,10 +56,16 @@ def test_prepare_diffusion_args_sets_skip_tokenizer():
     assert args.skip_tokenizer_init is True
 
 
-def test_main_sets_skip_tokenizer_for_diffusion():
-    args = Namespace(
+def test_prepare_diffusion_args_respects_explicit_tokenizer():
+    args = Namespace(tokenizer="gpt2")
+    _prepare_diffusion_args(args)
+    assert not getattr(args, "skip_tokenizer_init", False)
+
+
+def _make_bench_args(**overrides):
+    defaults = dict(
         endpoint="/v1/images/generations",
-        backend="openai-image-gen-omni",
+        backend="",
         seed_tts_wer_eval=False,
         seed_tts_wer_save_items=False,
         daily_omni_save_eval_items=False,
@@ -53,7 +74,14 @@ def test_main_sets_skip_tokenizer_for_diffusion():
         print_stage=False,
         extra_body=None,
         dataset_name=None,
+        tokenizer=None,
     )
+    defaults.update(overrides)
+    return Namespace(**defaults)
+
+
+def test_main_sets_skip_tokenizer_for_diffusion():
+    args = _make_bench_args()
     with patch(
         "vllm_omni.benchmarks.serve.main_async",
         new_callable=AsyncMock,
@@ -62,5 +90,29 @@ def test_main_sets_skip_tokenizer_for_diffusion():
         result = main(args)
         assert mock.called
         assert result == {"ok": True}
+        called_args = mock.call_args[0][0]
+        assert called_args.skip_tokenizer_init is True
+
+
+def test_main_does_not_skip_tokenizer_when_explicit():
+    args = _make_bench_args(tokenizer="gpt2")
+    with patch(
+        "vllm_omni.benchmarks.serve.main_async",
+        new_callable=AsyncMock,
+        return_value={"ok": True},
+    ) as mock:
+        main(args)
+        called_args = mock.call_args[0][0]
+        assert not getattr(called_args, "skip_tokenizer_init", False)
+
+
+def test_main_slashless_endpoint_sets_skip_tokenizer():
+    args = _make_bench_args(endpoint="v1/videos")
+    with patch(
+        "vllm_omni.benchmarks.serve.main_async",
+        new_callable=AsyncMock,
+        return_value={"ok": True},
+    ) as mock:
+        main(args)
         called_args = mock.call_args[0][0]
         assert called_args.skip_tokenizer_init is True
