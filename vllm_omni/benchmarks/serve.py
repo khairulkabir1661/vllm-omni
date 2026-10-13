@@ -66,23 +66,23 @@ _DIFFUSION_ENDPOINTS = frozenset(
 
 _DIFFUSION_BACKENDS = frozenset(
     {
-        "openai-image-gen-omni",
         "openai-image-edits-omni",
-        "openai-video-omni",
     }
 )
 
 
 def is_diffusion_benchmark(args) -> bool:
     """Return True when the benchmark targets a diffusion/image/video endpoint."""
-    endpoint = getattr(args, "endpoint", None) or ""
+    endpoint = _normalize_endpoint(getattr(args, "endpoint", None)) or ""
     backend = getattr(args, "backend", None) or ""
     return endpoint in _DIFFUSION_ENDPOINTS or backend in _DIFFUSION_BACKENDS
 
 
 def _prepare_diffusion_args(args: argparse.Namespace) -> None:
-    """Set defaults so upstream ``main_async`` skips tokenizer init for diffusion."""
-    args.skip_tokenizer_init = True
+    """Set ``skip_tokenizer_init`` when no explicit tokenizer was requested."""
+    tokenizer = getattr(args, "tokenizer", None)
+    if tokenizer is None:
+        args.skip_tokenizer_init = True
 
 
 def main(args: argparse.Namespace) -> dict[str, Any]:
