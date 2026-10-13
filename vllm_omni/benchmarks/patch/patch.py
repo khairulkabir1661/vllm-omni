@@ -587,29 +587,6 @@ def _videomme_repo_from_args(args, *, explicit: bool = False) -> str | None:
     return None
 
 
-_DIFFUSION_ENDPOINTS = frozenset(
-    {
-        "/v1/images/generations",
-        "/v1/images/edits",
-        "/v1/videos",
-    }
-)
-
-_DIFFUSION_BACKENDS = frozenset(
-    {
-        "openai-image-gen-omni",
-        "openai-image-edits-omni",
-        "openai-video-omni",
-    }
-)
-
-
-def _is_diffusion_get_samples(args) -> bool:
-    endpoint = getattr(args, "endpoint", None) or ""
-    backend = getattr(args, "backend", None) or ""
-    return endpoint in _DIFFUSION_ENDPOINTS or backend in _DIFFUSION_BACKENDS
-
-
 def get_samples(args, tokenizer, **kwargs):
     """Omni override of ``vllm.benchmarks.datasets.get_samples``.
 
@@ -619,7 +596,9 @@ def get_samples(args, tokenizer, **kwargs):
     forwarded to the original implementation on every delegate path.
     """
     # Diffusion models have no tokenizer — handle them before anything else.
-    if _is_diffusion_get_samples(args):
+    from vllm_omni.benchmarks.serve import is_diffusion_benchmark
+
+    if is_diffusion_benchmark(args):
         from vllm_omni.benchmarks.data_modules.diffusion_dataset import (
             load_diffusion_samples,
         )
