@@ -4,12 +4,11 @@
 """Benchmark batch chat completion: optimized vs legacy path.
 
 Measures wall-clock latency and throughput at varying batch sizes.
-Requires a running vLLM-Omni server.
+Requires a running vLLM-Omni server (``vllm-omni serve <model>``).
 
 Usage:
     python benchmarks/batch_chat_completion_bench.py \
         --base-url http://localhost:8000 \
-        --model Qwen/Qwen2.5-Omni-7B \
         --batch-sizes 1 2 4 8 16 32
 """
 
@@ -56,7 +55,7 @@ def bench_batch(
     warmup: int,
     repeats: int,
 ) -> dict:
-    url = f"{base_url}/v1/batch/chat/completions"
+    url = f"{base_url}/v1/chat/completions/batch"
     payload = build_batch_payload(model, batch_size, max_tokens)
 
     for _ in range(warmup):
@@ -117,7 +116,7 @@ def bench_sequential(
 def main():
     parser = argparse.ArgumentParser(description="Benchmark batch chat completion")
     parser.add_argument("--base-url", default="http://localhost:8000")
-    parser.add_argument("--model", required=True)
+    parser.add_argument("--model", default=None, help="Model name (auto-detected from server if omitted)")
     parser.add_argument(
         "--batch-sizes",
         nargs="+",
@@ -129,6 +128,15 @@ def main():
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--output", type=str, default=None, help="Save results to JSON file")
     args = parser.parse_args()
+
+    if args.model is None:
+        resp = requests.get(f"{args.base_url}/v1/models", timeout=10)
+        resp.raise_for_status()
+        models = resp.json()["data"]
+        if not models:
+            raise SystemExit("No models found on server")
+        args.model = models[0]["id"]
+        print(f"Auto-detected model: {args.model}")
 
     print(f"Model: {args.model}")
     print(f"Batch sizes: {args.batch_sizes}")
