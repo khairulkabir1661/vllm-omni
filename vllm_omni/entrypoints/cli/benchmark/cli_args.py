@@ -263,8 +263,6 @@ def add_multi_stage_cli_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-from vllm_omni.benchmarks.serve import is_diffusion_benchmark
-
 _DIFFUSION_TASK_TO_ENDPOINT = {
     "t2i": "/v1/images/generations",
     "i2i": "/v1/images/edits",
@@ -660,6 +658,8 @@ def add_omni_args(parser: argparse.ArgumentParser) -> None:
 
 def _preprocess_diffusion_args(args: argparse.Namespace) -> None:
     """Auto-map diffusion task to endpoint/backend when not explicitly set."""
+    from vllm_omni.benchmarks.serve import is_diffusion_benchmark
+
     task = getattr(args, "diffusion_task", None)
     if task is None and not is_diffusion_benchmark(args):
         return
