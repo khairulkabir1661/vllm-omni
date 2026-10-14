@@ -61,9 +61,7 @@ def test_custom_loads_jsonl():
         f.write(json.dumps({"prompt": "a red car"}) + "\n")
         f.write(json.dumps({"prompt": "a blue sky"}) + "\n")
         f.flush()
-        samples = load_diffusion_samples(
-            _make_args(diffusion_dataset="custom", dataset_path=f.name, num_prompts=0)
-        )
+        samples = load_diffusion_samples(_make_args(diffusion_dataset="custom", dataset_path=f.name, num_prompts=0))
     assert len(samples) == 2
     assert samples[0].prompt == "a red car"
 
