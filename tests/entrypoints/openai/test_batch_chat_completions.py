@@ -11,6 +11,7 @@ from openai.types.chat import ChatCompletionUserMessageParam
 from openai.types.chat.chat_completion_audio import ChatCompletionAudio
 from starlette.requests import Request
 from vllm.entrypoints.chat_utils import ChatCompletionMessageParam
+from vllm.entrypoints.generate.base.protocol import RequestResponseMetadata
 from vllm.entrypoints.openai.chat_completion.protocol import (
     BatchChatCompletionRequest,
     ChatCompletionResponse,
@@ -20,7 +21,6 @@ from vllm.entrypoints.openai.chat_completion.protocol import (
 from vllm.entrypoints.serve.engine.protocol import (
     ErrorInfo,
     ErrorResponse,
-    RequestResponseMetadata,
     UsageInfo,
 )
 from vllm.outputs import CompletionOutput

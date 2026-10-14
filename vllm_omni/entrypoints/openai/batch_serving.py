@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import Request
 from pydantic import ValidationError
+from vllm.entrypoints.generate.base.protocol import RequestResponseMetadata
 from vllm.entrypoints.openai.chat_completion.protocol import (
     BatchChatCompletionRequest,
     ChatCompletionRequest,
@@ -16,7 +17,6 @@ from vllm.entrypoints.openai.chat_completion.protocol import (
 )
 from vllm.entrypoints.serve.engine.protocol import (
     ErrorResponse,
-    RequestResponseMetadata,
     UsageInfo,
 )
 from vllm.logger import init_logger
@@ -171,9 +171,14 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
         all_engine_prompts: list[Any] = []
         single_requests: list[ChatCompletionRequest] = []
 
-        for messages in request.messages:
+        for idx, messages in enumerate(request.messages):
             # Per-item 1: Convert batch entry to a single ChatCompletionRequest
-            single_request = request.to_chat_completion_request(messages)
+            try:
+                single_request = request.to_chat_completion_request(messages)
+            except (ValidationError, ValueError, TypeError) as e:
+                return self.create_error_response(
+                    f"Message {idx} could not be converted to a chat completion request: {e}",
+                )
             single_request.stream = False
             single_requests.append(single_request)
 
@@ -250,7 +255,10 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
             async for prompt_idx, res in merge_async_iterators(*generators):
                 per_item_outputs[prompt_idx].append(res)
         except asyncio.CancelledError:
-            return self.create_error_response("Client disconnected")
+            for gen in generators:
+                if hasattr(gen, "aclose"):
+                    await gen.aclose()
+            raise
 
         choices: list[ChatCompletionResponseChoice] = []
         total_prompt_tokens = 0
