@@ -546,10 +546,17 @@ def get_samples(args, tokenizer, **kwargs):
     any upstream caller reaching this patched replacement keeps working; they are
     forwarded to the original implementation on every delegate path.
     """
-    # Diffusion models have no tokenizer — handle them before anything else.
-    from vllm_omni.benchmarks.serve import is_diffusion_benchmark
+    # Diffusion generation models (not image-edits, which need input images
+    # supplied by the existing dataset path).
+    from vllm_omni.benchmarks.serve import (
+        _normalize_endpoint,
+        is_diffusion_benchmark,
+    )
 
-    if is_diffusion_benchmark(args):
+    endpoint = _normalize_endpoint(getattr(args, "endpoint", None)) or ""
+    backend = getattr(args, "backend", None) or ""
+    is_image_edit = endpoint == "/v1/images/edits" or backend == "openai-image-edits-omni"
+    if is_diffusion_benchmark(args) and not is_image_edit:
         from vllm_omni.benchmarks.data_modules.diffusion_dataset import (
             load_diffusion_samples,
         )

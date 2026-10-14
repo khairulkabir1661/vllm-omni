@@ -93,16 +93,18 @@ def _load_random_prompts(args: Namespace) -> list[dict[str, Any]]:
 
     if config_str:
         profiles = json.loads(config_str)
-        weights = [p.pop("weight", 1.0) for p in profiles]
+        weights = [p.get("weight", 1.0) for p in profiles]
         rng = random.Random(getattr(args, "seed", 42))
         sampled = rng.choices(profiles, weights=weights, k=num_prompts)
         items: list[dict[str, Any]] = []
         for idx, profile in enumerate(sampled):
+            profile = dict(profile)
+            profile.pop("weight", None)
             prompt_text = profile.pop(
                 "prompt",
                 f"Random prompt {idx} for benchmarking diffusion models",
             )
-            items.append({"prompt": prompt_text, "overrides": dict(profile)})
+            items.append({"prompt": prompt_text, "overrides": profile})
         return items
 
     return [{"prompt": f"Random prompt {i} for benchmarking diffusion models"} for i in range(num_prompts)]
