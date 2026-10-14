@@ -619,6 +619,35 @@ def test_fail_fast_on_timeout_rejects_finite_rate_before_dispatch(mocker) -> Non
     enable_fail_fast.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    ("task", "expected_endpoint"),
+    [
+        ("t2i", "/v1/images/generations"),
+        ("i2i", "/v1/images/edits"),
+        ("t2v", "/v1/videos"),
+        ("i2v", "/v1/videos"),
+    ],
+)
+def test_diffusion_task_auto_maps_endpoint(task: str, expected_endpoint: str) -> None:
+    parser = TrackingArgumentParser()
+    parser.add_argument("--endpoint", default="/v1/completions")
+    parser.add_argument("--backend", default="openai")
+    add_omni_args(parser)
+    args = parser.parse_args(["--diffusion-task", task])
+    preprocess_serve_args(args)
+    assert args.endpoint == expected_endpoint
+
+
+def test_diffusion_task_does_not_override_explicit_endpoint() -> None:
+    parser = TrackingArgumentParser()
+    parser.add_argument("--endpoint", default="/v1/completions")
+    parser.add_argument("--backend", default="openai")
+    add_omni_args(parser)
+    args = parser.parse_args(["--diffusion-task", "t2i", "--endpoint", "/v1/videos"])
+    preprocess_serve_args(args)
+    assert args.endpoint == "/v1/videos"
+
+
 def test_realtime_chat_choice_is_available_without_importing_runtime() -> None:
     parser = TrackingArgumentParser()
     parser.add_argument("--backend", choices=["openai-chat-omni"])

@@ -657,14 +657,13 @@ def add_omni_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _preprocess_diffusion_args(args: argparse.Namespace) -> None:
-    """Auto-map diffusion task to endpoint/backend when not explicitly set."""
-    from vllm_omni.benchmarks.serve import is_diffusion_benchmark
-
+    """Auto-map diffusion task to endpoint when not explicitly set."""
     task = getattr(args, "diffusion_task", None)
-    if task is None and not is_diffusion_benchmark(args):
+    if task is None:
         return
 
-    if task and not getattr(args, "endpoint", None):
+    explicit = getattr(args, "explicit_keys", ())
+    if task and "endpoint" not in explicit:
         args.endpoint = _DIFFUSION_TASK_TO_ENDPOINT[task]
 
 
