@@ -7,7 +7,6 @@ from argparse import Namespace
 from unittest.mock import patch
 
 import pytest
-
 from vllm.benchmarks.serve import ASYNC_REQUEST_FUNCS
 
 from vllm_omni.benchmarks.serve import (
