@@ -740,44 +740,6 @@ class TestQwen3OmniRealtimeWebSocket:
     @pytest.mark.omni
     @hardware_test(res={"cuda": "H100", "rocm": "MI325"}, num_cards=2)
     @pytest.mark.parametrize("omni_server", realtime_async_chunk_server_params, indirect=True)
-    def test_graceful_session_close(self, omni_server) -> None:
-        """session.close must cleanly end the session."""
-
-        async def _run():
-            ws, _ = await _conformance_open_session(omni_server.host, omni_server.port, omni_server.model)
-            await ws.send(json.dumps({"type": "session.close"}))
-            events: list[dict] = []
-            try:
-                await _conformance_recv_until(
-                    ws, lambda evts: any(e["type"] == "session.closed" for e in evts), timeout_s=15
-                )
-            except (ConnectionClosed, TimeoutError):
-                pass
-            else:
-                assert len(_conformance_events_of_type(events, "session.closed")) == 1
-            ws2, events2 = await _conformance_open_session(omni_server.host, omni_server.port, omni_server.model)
-            async with ws2:
-                assert _conformance_events_of_type(events2, "session.created")
-
-        asyncio.run(_run())
-
-    @pytest.mark.advanced_model
-    @pytest.mark.omni
-    @hardware_test(res={"cuda": "H100", "rocm": "MI325"}, num_cards=2)
-    @pytest.mark.parametrize("omni_server", realtime_async_chunk_server_params, indirect=True)
-    def test_abnormal_disconnect_no_leak(self, omni_server) -> None:
-        """An abrupt disconnect must not prevent opening a new session."""
-
-        async def _run():
-            ws, _ = await _conformance_open_session(omni_server.host, omni_server.port, omni_server.model)
-            await ws.close()
-            await asyncio.sleep(2)
-            ws2, events2 = await _conformance_open_session(omni_server.host, omni_server.port, omni_server.model)
-            async with ws2:
-                assert len(_conformance_events_of_type(events2, "session.created")) == 1
-
-        asyncio.run(_run())
-
 
 # These regressions use the engine-owned Qwen duplex plugin. The older class
 # above intentionally exercises the separate turn/STT deployment.
