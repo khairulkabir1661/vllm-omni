@@ -26,7 +26,6 @@ import numpy as np
 import pytest
 import websockets
 import yaml
-from websockets.exceptions import ConnectionClosed
 
 from tests.e2e.online_serving.helpers.minicpmo_4_5_duplex import validated_input_wav, validated_soft_interrupt_wav
 from tests.helpers.mark import hardware_test
@@ -736,10 +735,6 @@ class TestQwen3OmniRealtimeWebSocket:
 
         asyncio.run(_run())
 
-    @pytest.mark.advanced_model
-    @pytest.mark.omni
-    @hardware_test(res={"cuda": "H100", "rocm": "MI325"}, num_cards=2)
-    @pytest.mark.parametrize("omni_server", realtime_async_chunk_server_params, indirect=True)
 
 # These regressions use the engine-owned Qwen duplex plugin. The older class
 # above intentionally exercises the separate turn/STT deployment.
