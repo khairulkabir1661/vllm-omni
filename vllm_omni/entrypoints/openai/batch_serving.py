@@ -165,14 +165,10 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
             if isinstance(audio_format_check, ErrorResponse):
                 return audio_format_check
 
-        # --- Per-item checks and preprocessing ---
+        # --- Per-item conversion (synchronous, lightweight) ---
 
-        all_conversations: list[Any] = []
-        all_engine_prompts: list[Any] = []
         single_requests: list[ChatCompletionRequest] = []
-
         for idx, messages in enumerate(request.messages):
-            # Per-item 1: Convert batch entry to a single ChatCompletionRequest
             try:
                 single_request = request.to_chat_completion_request(messages)
             except (ValidationError, ValueError, TypeError) as e:
@@ -180,47 +176,52 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
                     f"Message {idx} could not be converted to a chat completion request: {e}",
                 )
             single_request.stream = False
-            single_requests.append(single_request)
 
-            # Per-item 2: Mistral tokenizer normalization
             if isinstance(tokenizer, MistralTokenizer):
                 maybe_serialize_tool_calls(single_request)
                 truncate_tool_call_ids(single_request)
                 validate_request_params(single_request)
 
-            # Per-item 3: Chat preprocessing (template rendering, prompt tokenization)
-            try:
-                if not self.use_harmony:
-                    merged_kwargs = self._effective_chat_template_kwargs(single_request)
-                    conversation, engine_prompts = await self._preprocess_chat(
-                        single_request,
-                        single_request.messages,
-                        default_template=(single_request.chat_template or self.chat_template),
-                        default_template_content_format=(self.chat_template_content_format),
-                        default_template_kwargs=merged_kwargs,
-                        tool_dicts=tool_dicts,
-                        tool_parser=tool_parser,
-                        renderer=renderer,
-                        add_generation_prompt=single_request.add_generation_prompt,
-                        continue_final_message=single_request.continue_final_message,
-                        documents=getattr(single_request, "documents", None),
-                        add_special_tokens=single_request.add_special_tokens,
-                    )
-                else:
-                    should_include_tools = tool_dicts is not None
-                    conversation, engine_prompts = self.online_renderer._make_request_with_harmony(
-                        single_request,
-                        should_include_tools,
-                    )
-            except (ValueError, TypeError, RuntimeError) as e:
-                logger.exception("Error preprocessing batch item")
-                message = str(e)
-                if e.__cause__ is not None:
-                    message = f"{message} {e.__cause__}"
-                return self.create_error_response(message)
+            single_requests.append(single_request)
 
-            all_conversations.append(conversation)
-            all_engine_prompts.append(engine_prompts[0])
+        # --- Per-item preprocessing (concurrent) ---
+
+        async def _preprocess_item(single_request: ChatCompletionRequest) -> tuple[Any, Any]:
+            if not self.use_harmony:
+                merged_kwargs = self._effective_chat_template_kwargs(single_request)
+                conversation, engine_prompts = await self._preprocess_chat(
+                    single_request,
+                    single_request.messages,
+                    default_template=(single_request.chat_template or self.chat_template),
+                    default_template_content_format=self.chat_template_content_format,
+                    default_template_kwargs=merged_kwargs,
+                    tool_dicts=tool_dicts,
+                    tool_parser=tool_parser,
+                    renderer=renderer,
+                    add_generation_prompt=single_request.add_generation_prompt,
+                    continue_final_message=single_request.continue_final_message,
+                    documents=getattr(single_request, "documents", None),
+                    add_special_tokens=single_request.add_special_tokens,
+                )
+            else:
+                should_include_tools = tool_dicts is not None
+                conversation, engine_prompts = self.online_renderer._make_request_with_harmony(
+                    single_request,
+                    should_include_tools,
+                )
+            return conversation, engine_prompts[0]
+
+        try:
+            results = await asyncio.gather(*[_preprocess_item(r) for r in single_requests])
+        except (ValueError, TypeError, RuntimeError) as e:
+            logger.exception("Error preprocessing batch item")
+            message = str(e)
+            if e.__cause__ is not None:
+                message = f"{message} {e.__cause__}"
+            return self.create_error_response(message)
+
+        all_conversations = [r[0] for r in results]
+        all_engine_prompts = [r[1] for r in results]
 
         return all_conversations, all_engine_prompts, single_requests
 
