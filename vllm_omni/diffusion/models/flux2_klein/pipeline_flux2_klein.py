@@ -183,9 +183,7 @@ def compute_empirical_mu(image_seq_len: int, num_steps: int) -> float:
     return float(mu)
 
 
-class Flux2KleinPipeline(
-    DiffusionPipelineBase, CFGParallelMixin, SupportImageInput, DiffusionPipelineProfilerMixin
-):
+class Flux2KleinPipeline(DiffusionPipelineBase, CFGParallelMixin, SupportImageInput, DiffusionPipelineProfilerMixin):
     """Flux2 klein pipeline for text-to-image generation."""
 
     default_num_inference_steps = 50

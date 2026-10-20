@@ -306,7 +306,6 @@ class QwenImage21Pipeline(
     the transformer sees one interleaved text/image sequence.
     """
 
-    default_num_inference_steps = 50
     supports_request_batch = True
     supports_step_execution: ClassVar[bool] = True
     _dit_modules: ClassVar[list[str]] = ["transformer"]

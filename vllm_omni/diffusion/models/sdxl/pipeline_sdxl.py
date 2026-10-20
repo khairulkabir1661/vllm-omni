@@ -40,9 +40,7 @@ def get_sdxl_image_post_process_func(od_config: OmniDiffusionConfig):
     return post_process_func
 
 
-class StableDiffusionXLPipeline(
-    DiffusionPipelineBase, CFGParallelMixin, DiffusionPipelineProfilerMixin
-):
+class StableDiffusionXLPipeline(DiffusionPipelineBase, CFGParallelMixin, DiffusionPipelineProfilerMixin):
     _dit_modules: list[str] = ["unet"]
     _encoder_modules: list[str] = ["text_encoder", "text_encoder_2"]
     _vae_modules: list[str] = ["vae"]

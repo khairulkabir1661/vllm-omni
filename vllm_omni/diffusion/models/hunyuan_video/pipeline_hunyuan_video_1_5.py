@@ -86,9 +86,7 @@ def get_hunyuan_video_15_post_process_func(od_config: OmniDiffusionConfig):
     return post_process_func
 
 
-class HunyuanVideo15Pipeline(
-    DiffusionPipelineBase, CFGParallelMixin, ProgressBarMixin, DiffusionPipelineProfilerMixin
-):
+class HunyuanVideo15Pipeline(DiffusionPipelineBase, CFGParallelMixin, ProgressBarMixin, DiffusionPipelineProfilerMixin):
     default_num_inference_steps = 50
     _dit_modules: ClassVar[list[str]] = ["transformer"]
     _encoder_modules: ClassVar[list[str]] = ["text_encoder", "text_encoder_2"]

@@ -68,9 +68,7 @@ def get_flux_post_process_func(
     return post_process_func
 
 
-class FluxPipeline(
-    DiffusionPipelineBase, FluxPipelineMixin, CFGParallelMixin, DiffusionPipelineProfilerMixin
-):
+class FluxPipeline(DiffusionPipelineBase, FluxPipelineMixin, CFGParallelMixin, DiffusionPipelineProfilerMixin):
     supports_request_batch = True
     default_num_inference_steps = 28
 

@@ -188,20 +188,14 @@ class DiffusersAdapterPipeline(DiffusionPipelineBase, DiffusionPipelineProfilerM
     def _discover_components(self) -> None:
         pipe = self._pipeline
         self._dit_modules = [
-            f"_pipeline.{attr}"
-            for attr in ("transformer", "unet")
-            if getattr(pipe, attr, None) is not None
+            f"_pipeline.{attr}" for attr in ("transformer", "unet") if getattr(pipe, attr, None) is not None
         ]
         self._encoder_modules = [
             f"_pipeline.{attr}"
             for attr in ("text_encoder", "text_encoder_2", "text_encoder_3")
             if getattr(pipe, attr, None) is not None
         ]
-        self._vae_modules = [
-            f"_pipeline.{attr}"
-            for attr in ("vae",)
-            if getattr(pipe, attr, None) is not None
-        ]
+        self._vae_modules = [f"_pipeline.{attr}" for attr in ("vae",) if getattr(pipe, attr, None) is not None]
 
     def _load_pipeline_from_pretrained(
         self,

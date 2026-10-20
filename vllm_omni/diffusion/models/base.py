@@ -54,9 +54,7 @@ class DiffusionPipelineBase(nn.Module, SupportsComponentDiscovery, ABC):
         ...
 
     @abstractmethod
-    def load_weights(
-        self, weights: Iterable[tuple[str, torch.Tensor]]
-    ) -> set[str]:
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         """Load pretrained weights into the pipeline.
 
         Args:
