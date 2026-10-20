@@ -19,7 +19,7 @@ from vllm_omni.diffusion.distributed.cfg_parallel import CFGParallelMixin
 from vllm_omni.diffusion.distributed.utils import get_local_device
 from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
 from vllm_omni.diffusion.model_loader.hub_prefetch import from_pretrained_with_prefetch, prefetch_subfolders
-from vllm_omni.diffusion.models.interface import SupportsComponentDiscovery
+from vllm_omni.diffusion.models.base import DiffusionPipelineBase
 from vllm_omni.diffusion.models.sdxl.sdxl_unet import SDXLUNet2DConditionModel
 from vllm_omni.diffusion.profiler.diffusion_pipeline_profiler import DiffusionPipelineProfilerMixin
 from vllm_omni.diffusion.worker.request_batch import DiffusionRequestBatch, split_diffusion_output_by_request
@@ -41,13 +41,14 @@ def get_sdxl_image_post_process_func(od_config: OmniDiffusionConfig):
 
 
 class StableDiffusionXLPipeline(
-    nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMixin, SupportsComponentDiscovery
+    DiffusionPipelineBase, CFGParallelMixin, DiffusionPipelineProfilerMixin
 ):
     _dit_modules: list[str] = ["unet"]
     _encoder_modules: list[str] = ["text_encoder", "text_encoder_2"]
     _vae_modules: list[str] = ["vae"]
     _resident_modules: list[str] = []
     supports_request_batch = True
+    default_num_inference_steps = 50
 
     def __init__(
         self,
