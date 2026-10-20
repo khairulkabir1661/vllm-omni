@@ -1,336 +1,352 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
-"""Benchmark batch chat completion endpoint.
+"""Benchmark: batch chat completion endpoint vs N individual requests.
 
-Measures wall-clock latency and throughput at varying batch sizes.
-Requires a running vLLM-Omni server (``vllm-omni serve <model>``).
+Requires a running vLLM-Omni server.  Measures wall-clock latency of:
+  - Batch endpoint:  POST /v1/chat/completions/batch  (N messages)
+  - Individual:      N concurrent POST /v1/chat/completions
 
-Usage (batch vs sequential on one server):
-    python benchmarks/batch_chat_completion_bench.py \
-        --base-url http://localhost:8000 \
-        --batch-sizes 1 2 4 8 16
+Usage:
+    # Start server first, then:
+    python benchmarks/batch_chat_completion_bench.py
 
-Usage (batch-only for A/B comparison between two server revisions):
-    # Start base server on port 8000, head server on port 8001
-    python benchmarks/batch_chat_completion_bench.py \
-        --batch-only \
-        --base-url http://localhost:8000 \
-        --label base \
-        --batch-sizes 1 2 4 8 16 \
-        --output base_results.json
+    # Custom settings:
+    python benchmarks/batch_chat_completion_bench.py \\
+        --base-url http://localhost:8000 \\
+        --batch-sizes 1 2 4 8 16 32 64 \\
+        --max-tokens 32 --warmup 5 --repeats 10
 
-    python benchmarks/batch_chat_completion_bench.py \
-        --batch-only \
-        --base-url http://localhost:8001 \
-        --label head \
-        --batch-sizes 1 2 4 8 16 \
-        --output head_results.json
+    # Save results for A/B comparison:
+    python benchmarks/batch_chat_completion_bench.py --output head.json
 
-    python benchmarks/batch_chat_completion_bench.py \
-        --compare base_results.json head_results.json
+    # Compare two saved results:
+    python benchmarks/batch_chat_completion_bench.py \\
+        --compare base.json head.json
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import statistics
 import time
 
-import requests
+import httpx
+
+PROMPTS = [
+    "Explain what a neural network is in one sentence.",
+    "What is the capital of France?",
+    "Write a haiku about the ocean.",
+    "What is 2 + 2?",
+    "Name three primary colors.",
+    "What year did the moon landing happen?",
+    "Define the word 'serendipity'.",
+    "What is the speed of light?",
+    "Explain gravity in simple terms.",
+    "What is the largest planet in our solar system?",
+    "How many continents are there?",
+    "What is photosynthesis?",
+    "Name the four seasons.",
+    "What is the boiling point of water in Celsius?",
+    "What does DNA stand for?",
+    "Explain what an algorithm is.",
+    "What is the smallest prime number?",
+    "Name a mammal that can fly.",
+    "What is the chemical symbol for gold?",
+    "How many sides does a hexagon have?",
+    "What is the speed of sound approximately?",
+    "Name the closest star to Earth.",
+    "What is the freezing point of water in Fahrenheit?",
+    "Define the word 'ubiquitous'.",
+    "What is the square root of 144?",
+    "Name the longest river in the world.",
+    "What is an atom?",
+    "How many bones are in the adult human body?",
+    "What is the chemical formula for water?",
+    "Name the inventor of the telephone.",
+    "What is the largest ocean on Earth?",
+    "Define the word 'ephemeral'.",
+    "What is Pi approximately equal to?",
+    "Name the first element on the periodic table.",
+    "What causes rainbows?",
+    "How many legs does a spider have?",
+    "What is the capital of Japan?",
+    "Define the word 'pragmatic'.",
+    "What is absolute zero in Celsius?",
+    "Name the largest desert on Earth.",
+    "What is a black hole?",
+    "How many minutes are in a day?",
+    "What is the hardest natural substance?",
+    "Name the author of Romeo and Juliet.",
+    "What is the tallest mountain on Earth?",
+    "Define the word 'paradigm'.",
+    "What is the distance from Earth to the Moon approximately?",
+    "Name three types of rocks.",
+    "What is an eclipse?",
+    "How many teeth does an adult human have?",
+    "What is the chemical symbol for silver?",
+    "Name the smallest country in the world.",
+    "What is entropy?",
+    "How many strings does a standard guitar have?",
+    "What is the capital of Australia?",
+    "Define the word 'dichotomy'.",
+    "What is the speed of Earth's rotation?",
+    "Name the largest animal ever known to exist.",
+    "What is a supernova?",
+    "How many chambers does the human heart have?",
+    "What is the chemical formula for salt?",
+    "Name the deepest point in the ocean.",
+    "What is a quasar?",
+    "How many chromosomes do humans have?",
+]
 
 
-def build_batch_payload(
+async def detect_model(client: httpx.AsyncClient, base_url: str) -> str:
+    resp = await client.get(f"{base_url}/v1/models")
+    resp.raise_for_status()
+    models = resp.json()["data"]
+    if not models:
+        raise RuntimeError("No models found on the server")
+    return models[0]["id"]
+
+
+async def bench_batch(
+    client: httpx.AsyncClient,
+    base_url: str,
     model: str,
     batch_size: int,
-    max_tokens: int = 32,
-) -> dict:
-    messages = [[{"role": "user", "content": f"Say hello in exactly one word. (item {i})"}] for i in range(batch_size)]
-    return {
+    max_tokens: int,
+) -> float:
+    """Send one batch request with batch_size messages. Return latency in seconds."""
+    messages = [
+        [{"role": "user", "content": PROMPTS[i % len(PROMPTS)]}]
+        for i in range(batch_size)
+    ]
+    payload = {
         "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
     }
-
-
-def build_single_payload(
-    model: str,
-    max_tokens: int = 32,
-    item_idx: int = 0,
-) -> dict:
-    return {
-        "model": model,
-        "messages": [{"role": "user", "content": f"Say hello in exactly one word. (item {item_idx})"}],
-        "max_tokens": max_tokens,
-    }
-
-
-def bench_batch(
-    base_url: str,
-    model: str,
-    batch_size: int,
-    max_tokens: int,
-    warmup: int,
-    repeats: int,
-) -> dict:
-    url = f"{base_url}/v1/chat/completions/batch"
-    payload = build_batch_payload(model, batch_size, max_tokens)
-
-    for _ in range(warmup):
-        requests.post(url, json=payload, timeout=120)
-
-    latencies = []
-    for _ in range(repeats):
-        t0 = time.perf_counter()
-        resp = requests.post(url, json=payload, timeout=120)
-        t1 = time.perf_counter()
-        resp.raise_for_status()
-        latencies.append(t1 - t0)
-
-    return {
-        "path": "batch",
-        "batch_size": batch_size,
-        "latencies_s": latencies,
-        "mean_s": statistics.mean(latencies),
-        "median_s": statistics.median(latencies),
-        "throughput_req_per_s": batch_size / statistics.mean(latencies),
-    }
-
-
-def bench_sequential(
-    base_url: str,
-    model: str,
-    batch_size: int,
-    max_tokens: int,
-    warmup: int,
-    repeats: int,
-) -> dict:
-    url = f"{base_url}/v1/chat/completions"
-
-    for _ in range(warmup):
-        payload = build_single_payload(model, max_tokens)
-        requests.post(url, json=payload, timeout=120)
-
-    latencies = []
-    for _ in range(repeats):
-        t0 = time.perf_counter()
-        for i in range(batch_size):
-            payload = build_single_payload(model, max_tokens, item_idx=i)
-            resp = requests.post(url, json=payload, timeout=120)
-            resp.raise_for_status()
-        t1 = time.perf_counter()
-        latencies.append(t1 - t0)
-
-    return {
-        "path": "sequential",
-        "batch_size": batch_size,
-        "latencies_s": latencies,
-        "mean_s": statistics.mean(latencies),
-        "median_s": statistics.median(latencies),
-        "throughput_req_per_s": batch_size / statistics.mean(latencies),
-    }
-
-
-def auto_detect_model(base_url: str) -> str:
-    resp = requests.get(f"{base_url}/v1/models", timeout=10)
+    t0 = time.perf_counter()
+    resp = await client.post(
+        f"{base_url}/v1/chat/completions/batch",
+        json=payload,
+        timeout=300.0,
+    )
+    t1 = time.perf_counter()
     resp.raise_for_status()
-    models = resp.json()["data"]
-    if not models:
-        raise SystemExit("No models found on server")
-    return models[0]["id"]
+    data = resp.json()
+    assert "choices" in data, f"Unexpected response: {data}"
+    assert len(data["choices"]) == batch_size, (
+        f"Expected {batch_size} choices, got {len(data['choices'])}"
+    )
+    return t1 - t0
 
 
-def run_compare(files: list[str]) -> None:
-    if len(files) != 2:
-        raise SystemExit("--compare requires exactly 2 JSON files (base head)")
-    with open(files[0]) as f:
-        base_data = json.load(f)
-    with open(files[1]) as f:
-        head_data = json.load(f)
+async def bench_individual(
+    client: httpx.AsyncClient,
+    base_url: str,
+    model: str,
+    batch_size: int,
+    max_tokens: int,
+) -> float:
+    """Send batch_size individual requests concurrently. Return total latency."""
+    payloads = [
+        {
+            "model": model,
+            "messages": [
+                {"role": "user", "content": PROMPTS[i % len(PROMPTS)]}
+            ],
+            "max_tokens": max_tokens,
+        }
+        for i in range(batch_size)
+    ]
 
-    base_label = base_data.get("label", "base")
-    head_label = head_data.get("label", "head")
+    async def _single(payload):
+        resp = await client.post(
+            f"{base_url}/v1/chat/completions",
+            json=payload,
+            timeout=300.0,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
-    print(f"Comparing: {base_label} vs {head_label}")
-    print(f"Model: {base_data.get('model', 'unknown')}")
+    t0 = time.perf_counter()
+    results = await asyncio.gather(*[_single(p) for p in payloads])
+    t1 = time.perf_counter()
+    assert len(results) == batch_size
+    return t1 - t0
+
+
+async def run_benchmark(args):
+    async with httpx.AsyncClient() as client:
+        model = args.model
+        if not model:
+            model = await detect_model(client, args.base_url)
+        print(f"Model: {model}")
+        print(f"Base URL: {args.base_url}")
+        print(f"Max tokens: {args.max_tokens}")
+        print(f"Batch sizes: {args.batch_sizes}")
+        print(f"Warmup: {args.warmup}, Repeats: {args.repeats}")
+        print()
+
+        # Warmup
+        print("Warming up...", end="", flush=True)
+        for _ in range(args.warmup):
+            await bench_batch(
+                client, args.base_url, model, 2, args.max_tokens,
+            )
+            await bench_individual(
+                client, args.base_url, model, 2, args.max_tokens,
+            )
+        print(" done\n")
+
+        header = (
+            f"{'Batch':>5} | "
+            f"{'Batch EP (ms)':>13} | "
+            f"{'Individual (ms)':>15} | "
+            f"{'Speedup':>8} | "
+            f"{'Batch req/s':>11} | "
+            f"{'Indiv req/s':>11}"
+        )
+        print(header)
+        print("-" * len(header))
+
+        all_results = []
+
+        for bs in args.batch_sizes:
+            batch_latencies = []
+            indiv_latencies = []
+
+            for _ in range(args.repeats):
+                bl = await bench_batch(
+                    client, args.base_url, model, bs, args.max_tokens,
+                )
+                batch_latencies.append(bl)
+
+                il = await bench_individual(
+                    client, args.base_url, model, bs, args.max_tokens,
+                )
+                indiv_latencies.append(il)
+
+            batch_median = statistics.median(batch_latencies)
+            indiv_median = statistics.median(indiv_latencies)
+            speedup = indiv_median / batch_median if batch_median > 0 else 0
+            batch_rps = bs / batch_median if batch_median > 0 else 0
+            indiv_rps = bs / indiv_median if indiv_median > 0 else 0
+
+            print(
+                f"{bs:>5} | "
+                f"{batch_median * 1000:>13.1f} | "
+                f"{indiv_median * 1000:>15.1f} | "
+                f"{speedup:>7.2f}x | "
+                f"{batch_rps:>11.1f} | "
+                f"{indiv_rps:>11.1f}"
+            )
+
+            all_results.append({
+                "batch_size": bs,
+                "batch_latency_ms": batch_median * 1000,
+                "individual_latency_ms": indiv_median * 1000,
+                "speedup": speedup,
+                "batch_req_per_sec": batch_rps,
+                "individual_req_per_sec": indiv_rps,
+                "batch_all_ms": [x * 1000 for x in batch_latencies],
+                "individual_all_ms": [x * 1000 for x in indiv_latencies],
+            })
+
+        if args.output:
+            out = {
+                "model": model,
+                "base_url": args.base_url,
+                "max_tokens": args.max_tokens,
+                "warmup": args.warmup,
+                "repeats": args.repeats,
+                "results": all_results,
+            }
+            with open(args.output, "w") as f:
+                json.dump(out, f, indent=2)
+            print(f"\nResults saved to {args.output}")
+
+
+def compare(file_a: str, file_b: str):
+    """Compare two saved benchmark results (base vs head)."""
+    with open(file_a) as f:
+        a = json.load(f)
+    with open(file_b) as f:
+        b = json.load(f)
+
+    print(f"A (base): {file_a}  model={a['model']}")
+    print(f"B (head): {file_b}  model={b['model']}")
     print()
 
-    cols = [
-        f"{'Batch Size':>10}",
-        f"{base_label + ' (s)':>12}",
-        f"{head_label + ' (s)':>12}",
-        f"{'Improvement':>12}",
-        f"{base_label + ' tp':>12}",
-        f"{head_label + ' tp':>12}",
-    ]
-    header = " | ".join(cols)
+    header = (
+        f"{'Batch':>5} | "
+        f"{'Base (ms)':>10} | "
+        f"{'Head (ms)':>10} | "
+        f"{'Change':>8} | "
+        f"{'Base req/s':>10} | "
+        f"{'Head req/s':>10}"
+    )
     print(header)
     print("-" * len(header))
 
-    for b, h in zip(base_data["results"], head_data["results"]):
-        bs = b["batch_size"]
-        b_mean = b["mean_s"]
-        h_mean = h["mean_s"]
-        improvement = b_mean / h_mean if h_mean > 0 else float("inf")
-        b_tp = b["throughput_req_per_s"]
-        h_tp = h["throughput_req_per_s"]
-        print(f"{bs:>10} | {b_mean:>12.4f} | {h_mean:>12.4f} | {improvement:>11.2f}x | {b_tp:>12.2f} | {h_tp:>12.2f}")
+    a_results = {r["batch_size"]: r for r in a["results"]}
+    b_results = {r["batch_size"]: r for r in b["results"]}
+
+    for bs in sorted(set(a_results) | set(b_results)):
+        ar = a_results.get(bs)
+        br = b_results.get(bs)
+        if not ar or not br:
+            continue
+
+        a_ms = ar["batch_latency_ms"]
+        b_ms = br["batch_latency_ms"]
+        speedup = a_ms / b_ms if b_ms > 0 else 0
+        a_rps = ar["batch_req_per_sec"]
+        b_rps = br["batch_req_per_sec"]
+
+        marker = "faster" if speedup > 1.05 else "slower" if speedup < 0.95 else "~same"
+        print(
+            f"{bs:>5} | "
+            f"{a_ms:>10.1f} | "
+            f"{b_ms:>10.1f} | "
+            f"{speedup:>6.2f}x {marker} | "  # noqa: E501
+            f"{a_rps:>10.1f} | "
+            f"{b_rps:>10.1f}"
+        )
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Benchmark batch chat completion")
-    parser.add_argument("--base-url", default="http://localhost:8000")
-    parser.add_argument(
-        "--model",
-        default=None,
-        help="Model name (auto-detected from server if omitted)",
+    parser = argparse.ArgumentParser(
+        description="Benchmark batch chat completion endpoint"
     )
     parser.add_argument(
-        "--batch-sizes",
-        nargs="+",
-        type=int,
-        default=[1, 2, 4, 8, 16],
+        "--base-url", default="http://localhost:8000",
+        help="vLLM server base URL",
+    )
+    parser.add_argument("--model", default=None, help="Model name (auto-detected if omitted)")
+    parser.add_argument(
+        "--batch-sizes", nargs="+", type=int,
+        default=[1, 2, 4, 8, 16, 32, 64],
     )
     parser.add_argument("--max-tokens", type=int, default=32)
-    parser.add_argument("--warmup", type=int, default=1)
-    parser.add_argument("--repeats", type=int, default=3)
-    parser.add_argument("--output", type=str, default=None, help="Save results to JSON file")
+    parser.add_argument("--warmup", type=int, default=5)
+    parser.add_argument("--repeats", type=int, default=10)
+    parser.add_argument("--output", type=str, default=None, help="Save results to JSON")
     parser.add_argument(
-        "--batch-only",
-        action="store_true",
-        help="Only benchmark the batch endpoint (for A/B comparison)",
-    )
-    parser.add_argument(
-        "--label",
-        type=str,
-        default=None,
-        help="Label for this run (e.g. 'base' or 'head')",
-    )
-    parser.add_argument(
-        "--compare",
-        nargs=2,
-        metavar=("BASE_JSON", "HEAD_JSON"),
+        "--compare", nargs=2, metavar=("BASE", "HEAD"),
         help="Compare two saved result files",
     )
     args = parser.parse_args()
 
     if args.compare:
-        run_compare(args.compare)
+        compare(args.compare[0], args.compare[1])
         return
 
-    if args.model is None:
-        args.model = auto_detect_model(args.base_url)
-        print(f"Auto-detected model: {args.model}")
-
-    print(f"Model: {args.model}")
-    print(f"Batch sizes: {args.batch_sizes}")
-    print(f"Max tokens: {args.max_tokens}, Warmup: {args.warmup}, Repeats: {args.repeats}")
-    if args.label:
-        print(f"Label: {args.label}")
-    print()
-
-    if args.batch_only:
-        cols = [
-            f"{'Batch Size':>10}",
-            f"{'Mean (s)':>10}",
-            f"{'Median (s)':>10}",
-            f"{'Throughput':>12}",
-        ]
-        header = " | ".join(cols)
-        print(header)
-        print("-" * len(header))
-
-        all_results = []
-        for bs in args.batch_sizes:
-            result = bench_batch(
-                args.base_url,
-                args.model,
-                bs,
-                args.max_tokens,
-                args.warmup,
-                args.repeats,
-            )
-            print(
-                f"{bs:>10} | "
-                f"{result['mean_s']:>10.4f} | "
-                f"{result['median_s']:>10.4f} | "
-                f"{result['throughput_req_per_s']:>12.2f}"
-            )
-            all_results.append(result)
-
-        if args.output:
-            save_data = {
-                "label": args.label or "unlabeled",
-                "model": args.model,
-                "max_tokens": args.max_tokens,
-                "warmup": args.warmup,
-                "repeats": args.repeats,
-                "results": [{k: v for k, v in r.items() if k != "latencies_s"} for r in all_results],
-            }
-            with open(args.output, "w") as f:
-                json.dump(save_data, f, indent=2)
-            print(f"\nResults saved to {args.output}")
-        return
-
-    cols = [
-        f"{'Batch Size':>10}",
-        f"{'Path':>12}",
-        f"{'Mean (s)':>10}",
-        f"{'Median (s)':>10}",
-        f"{'Throughput':>12}",
-        f"{'Speedup':>8}",
-    ]
-    header = " | ".join(cols)
-    print(header)
-    print("-" * len(header))
-
-    all_results = []
-
-    for bs in args.batch_sizes:
-        seq_result = bench_sequential(
-            args.base_url,
-            args.model,
-            bs,
-            args.max_tokens,
-            args.warmup,
-            args.repeats,
-        )
-        batch_result = bench_batch(
-            args.base_url,
-            args.model,
-            bs,
-            args.max_tokens,
-            args.warmup,
-            args.repeats,
-        )
-
-        speedup = seq_result["mean_s"] / batch_result["mean_s"] if batch_result["mean_s"] > 0 else float("inf")
-
-        seq_tp = seq_result["throughput_req_per_s"]
-        bat_tp = batch_result["throughput_req_per_s"]
-        print(
-            f"{bs:>10} | {'sequential':>12} | "
-            f"{seq_result['mean_s']:>10.3f} | "
-            f"{seq_result['median_s']:>10.3f} | "
-            f"{seq_tp:>12.2f} |"
-        )
-        print(
-            f"{bs:>10} | {'batch':>12} | "
-            f"{batch_result['mean_s']:>10.3f} | "
-            f"{batch_result['median_s']:>10.3f} | "
-            f"{bat_tp:>12.2f} | {speedup:>7.2f}x"
-        )
-
-        all_results.append({"sequential": seq_result, "batch": batch_result, "speedup": speedup})
-
-    if args.output:
-        for r in all_results:
-            for key in ("sequential", "batch"):
-                r[key].pop("latencies_s", None)
-        with open(args.output, "w") as f:
-            json.dump(all_results, f, indent=2)
-        print(f"\nResults saved to {args.output}")
+    asyncio.run(run_benchmark(args))
 
 
 if __name__ == "__main__":
