@@ -285,12 +285,6 @@ class DiffusersAdapterPipeline(DiffusionPipelineBase, DiffusionPipelineProfilerM
                 "Sequence parallel is not supported with the diffusers backend. "
                 "It requires model-specific attention surgery."
             )
-        if self.od_config.cache_backend not in ("none", None):
-            raise NotImplementedError(
-                f"Cache backend '{self.od_config.cache_backend}' is not supported "
-                "with the diffusers backend. TeaCache/Cache-DiT require hooking "
-                "into individual transformer blocks."
-            )
         if self.od_config.enforce_eager:
             raise NotImplementedError(
                 "Eager execution is not supported with the diffusers backend. "
