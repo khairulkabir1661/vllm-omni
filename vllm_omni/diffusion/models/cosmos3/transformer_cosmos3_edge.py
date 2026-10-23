@@ -12,8 +12,10 @@ import torch.nn.functional as F
 from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.model_executor.layers.linear import ColumnParallelLinear, RowParallelLinear
 from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
+from vllm.model_executor.models.utils import is_pp_missing_parameter
 
 from vllm_omni.diffusion.attention.layer import Attention as FrameworkAttention
+from vllm_omni.diffusion.models.utils import release_module_parameters_to_meta
 
 from .transformer_cosmos3 import (
     Cosmos3VFMTransformer,
@@ -258,6 +260,7 @@ class Cosmos3EdgeLanguageModel(nn.Module):
         mrope_section: list[int],
         use_und_k_norm_for_gen: bool,
         quant_config: QuantizationConfig | None = None,
+        release_completed_blocks_to_meta: bool = False,
         prefix: str = "",
     ) -> None:
         super().__init__()
@@ -267,22 +270,22 @@ class Cosmos3EdgeLanguageModel(nn.Module):
             rope_theta=rope_theta,
             mrope_section=mrope_section,
         )
-        self.layers = nn.ModuleList(
-            [
-                Cosmos3EdgeUndDecoderLayer(
-                    hidden_size=hidden_size,
-                    intermediate_size=intermediate_size,
-                    num_attention_heads=num_attention_heads,
-                    num_key_value_heads=num_key_value_heads,
-                    head_dim=head_dim,
-                    rms_norm_eps=rms_norm_eps,
-                    use_und_k_norm_for_gen=use_und_k_norm_for_gen,
-                    quant_config=quant_config,
-                    prefix=f"{prefix}.layers.{i}",
-                )
-                for i in range(num_hidden_layers)
-            ]
-        )
+        self.layers = nn.ModuleList()
+        for i in range(num_hidden_layers):
+            layer = Cosmos3EdgeUndDecoderLayer(
+                hidden_size=hidden_size,
+                intermediate_size=intermediate_size,
+                num_attention_heads=num_attention_heads,
+                num_key_value_heads=num_key_value_heads,
+                head_dim=head_dim,
+                rms_norm_eps=rms_norm_eps,
+                use_und_k_norm_for_gen=use_und_k_norm_for_gen,
+                quant_config=quant_config,
+                prefix=f"{prefix}.layers.{i}",
+            )
+            if release_completed_blocks_to_meta:
+                release_module_parameters_to_meta(layer)
+            self.layers.append(layer)
         self.norm = RMSNorm(hidden_size, eps=rms_norm_eps)
 
     def forward(
@@ -384,8 +387,13 @@ class Cosmos3EdgeVFMTransformer(Cosmos3VFMTransformer):
                     *required_markers,
                     f"language_model.layers.{layer_idx}.self_attn.k_norm_und_for_gen.",
                 )
+            # Under pipeline parallelism each rank owns only its stage's layers
+            # (the UND backbone lives on the first stage); markers for layers
+            # that are PPMissingLayer on this rank are not expected here.
             missing.extend(
-                marker.rstrip(".") for marker in required_markers if not any(marker in name for name in loaded)
+                marker.rstrip(".")
+                for marker in required_markers
+                if not is_pp_missing_parameter(marker, self) and not any(marker in name for name in loaded)
             )
         if missing:
             preview = ", ".join(missing[:10])
