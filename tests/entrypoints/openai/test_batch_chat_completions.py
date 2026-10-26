@@ -283,11 +283,12 @@ def _make_text_omni_output(text="hello", prompt_tokens=5, completion_tokens=3):
     )
 
 
-def _make_audio_omni_output():
+def _make_audio_omni_output(prompt_tokens=3, completion_tokens=4):
     return _FakeOmniOutput(
         final_output_type="audio",
         stage_id=1,
-        outputs=[],
+        prompt_token_ids=list(range(prompt_tokens)),
+        outputs=[_fake_completion_output("audio", completion_tokens)],
     )
 
 
@@ -408,6 +409,37 @@ def test_generator_batch_text_plus_audio():
         assert choice.message.content == "hello"
         assert choice.message.audio is not None
         assert choice.message.audio.data == "base64audio"
+    # text (5 prompt + 2 completion via _create_text_choice) +
+    # audio (3 prompt + 4 completion counted from the output) per item
+    assert result.usage.prompt_tokens == 16
+    assert result.usage.completion_tokens == 12
+    assert result.usage.total_tokens == 28
+
+
+def test_generator_batch_audio_only_usage_counted():
+    """Audio-only items must contribute usage, not report usage: 0."""
+    handler = _make_generator_handler()
+    generators = [_async_gen(_make_audio_omni_output(prompt_tokens=7, completion_tokens=4)) for _ in range(2)]
+    request = _make_batch_request(2)
+    request.modalities = ["audio"]
+    conversations = [[{"role": "user", "content": "hi"}]] * 2
+    metadata = RequestResponseMetadata(request_id="batch-audio")
+
+    result = asyncio.run(
+        handler.chat_completion_full_generator_batch(
+            request,
+            generators,
+            "batch-audio",
+            "test-model",
+            conversations,
+            MagicMock(),
+            metadata,
+        )
+    )
+    assert not isinstance(result, ErrorResponse)
+    assert result.usage.prompt_tokens == 14
+    assert result.usage.completion_tokens == 8
+    assert result.usage.total_tokens == 22
 
 
 def test_generator_batch_empty_generator_returns_error():

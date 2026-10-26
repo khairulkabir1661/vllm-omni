@@ -225,6 +225,23 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
 
         return all_conversations, all_engine_prompts, single_requests
 
+    @staticmethod
+    def _count_output_tokens(omni_output: Any) -> tuple[int, int]:
+        """Count (prompt, completion) tokens directly from an ``OmniRequestOutput``.
+
+        Text choices report usage via ``_create_text_choice``; audio, image,
+        and diffusion-text choices don't, so count from the request output
+        itself (mirrors the streaming path's final usage accounting).
+        """
+        prompt_tokens = len(getattr(omni_output, "prompt_token_ids", None) or ())
+        encoder_ids = getattr(omni_output, "encoder_prompt_token_ids", None)
+        if encoder_ids is not None:
+            prompt_tokens += len(encoder_ids)
+        completion_tokens = sum(
+            len(getattr(o, "token_ids", None) or ()) for o in getattr(omni_output, "outputs", None) or ()
+        )
+        return prompt_tokens, completion_tokens
+
     async def chat_completion_full_generator_batch(
         self,
         request: BatchChatCompletionRequest,
@@ -326,6 +343,9 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
                                 stop_reason=None,
                             )
                         )
+                        p, c = self._count_output_tokens(omni_output)
+                        total_prompt_tokens += p
+                        total_completion_tokens += c
 
                 elif output_type == "audio":
                     audio_choices = self._create_audio_choice(
@@ -337,6 +357,9 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
                     if isinstance(audio_choices, ErrorResponse):
                         return audio_choices
                     item_choices.extend(audio_choices)
+                    p, c = self._count_output_tokens(omni_output)
+                    total_prompt_tokens += p
+                    total_completion_tokens += c
 
                 elif output_type == "image":
                     img_choices = self._create_image_choice(
@@ -346,6 +369,9 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
                         stream=False,
                     )
                     item_choices.extend(img_choices)
+                    p, c = self._count_output_tokens(omni_output)
+                    total_prompt_tokens += p
+                    total_completion_tokens += c
 
             if not item_choices:
                 return self.create_error_response(
