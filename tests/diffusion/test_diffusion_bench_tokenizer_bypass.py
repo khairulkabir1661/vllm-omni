@@ -4,7 +4,7 @@
 """Tests for diffusion benchmark tokenizer bypass (Issue #6873)."""
 
 from argparse import Namespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from vllm.benchmarks.serve import ASYNC_REQUEST_FUNCS
@@ -129,3 +129,27 @@ def test_main_slashless_endpoint_skips_tokenizer():
         with pytest.raises(ValueError, match="dataset-name"):
             main(args)
     mock_tokenizer.assert_not_called()
+
+
+def test_main_image_edit_keeps_tokenizer_init():
+    """Image edits with random-mm and no explicit --tokenizer must not skip
+    tokenizer init: the retained dataset path samples via tokenizer.vocab_size."""
+    args = _make_bench_args(endpoint="/v1/images/edits", dataset_name="random-mm")
+    with patch("vllm.benchmarks.serve.get_tokenizer", return_value=MagicMock()) as mock_tokenizer:
+        # Sampling proceeds with the mock tokenizer and eventually fails on it;
+        # any exception past the tokenizer check is fine — the point is that
+        # the tokenizer was loaded and the bypass did not fire.
+        with pytest.raises(Exception):
+            main(args)
+    mock_tokenizer.assert_called_once()
+    assert not args.skip_tokenizer_init
+
+
+def test_main_image_edit_backend_keeps_tokenizer_init():
+    """Same regression via the backend name instead of the endpoint."""
+    args = _make_bench_args(backend="openai-image-edits-omni", dataset_name="random-mm")
+    with patch("vllm.benchmarks.serve.get_tokenizer", return_value=MagicMock()) as mock_tokenizer:
+        with pytest.raises(Exception):
+            main(args)
+    mock_tokenizer.assert_called_once()
+    assert not args.skip_tokenizer_init

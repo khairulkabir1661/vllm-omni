@@ -94,6 +94,17 @@ def is_diffusion_benchmark(args) -> bool:
     return endpoint in _DIFFUSION_ENDPOINTS or backend in _DIFFUSION_BACKENDS
 
 
+def _is_image_edit_benchmark(args) -> bool:
+    """Return True when the benchmark targets the image-edit endpoint/backend.
+
+    Image edits keep the existing dataset path (e.g. ``random-mm``), whose
+    sampling requires a real tokenizer, so the tokenizer bypass must not apply.
+    """
+    endpoint = _normalize_endpoint(getattr(args, "endpoint", None)) or ""
+    backend = getattr(args, "backend", None) or ""
+    return endpoint == "/v1/images/edits" or backend == "openai-image-edits-omni"
+
+
 def _prepare_diffusion_args(args: argparse.Namespace) -> None:
     """Set ``skip_tokenizer_init`` when no explicit tokenizer was requested."""
     tokenizer = getattr(args, "tokenizer", None)
@@ -122,7 +133,9 @@ def main(args: argparse.Namespace) -> dict[str, Any]:
         enabled=should_request_stage_metrics(args),
     )
 
-    if is_diffusion_benchmark(args):
+    # Only the diffusion loader supports tokenizer-less sampling; image edits
+    # keep the existing dataset path, which requires a real tokenizer.
+    if is_diffusion_benchmark(args) and not _is_image_edit_benchmark(args):
         _prepare_diffusion_args(args)
 
     lock = (
