@@ -120,10 +120,7 @@ async def bench_batch(
     max_tokens: int,
 ) -> float:
     """Send one batch request with batch_size messages. Return latency in seconds."""
-    messages = [
-        [{"role": "user", "content": PROMPTS[i % len(PROMPTS)]}]
-        for i in range(batch_size)
-    ]
+    messages = [[{"role": "user", "content": PROMPTS[i % len(PROMPTS)]}] for i in range(batch_size)]
     payload = {
         "model": model,
         "messages": messages,
@@ -139,9 +136,7 @@ async def bench_batch(
     resp.raise_for_status()
     data = resp.json()
     assert "choices" in data, f"Unexpected response: {data}"
-    assert len(data["choices"]) == batch_size, (
-        f"Expected {batch_size} choices, got {len(data['choices'])}"
-    )
+    assert len(data["choices"]) == batch_size, f"Expected {batch_size} choices, got {len(data['choices'])}"
     return t1 - t0
 
 
@@ -156,9 +151,7 @@ async def bench_individual(
     payloads = [
         {
             "model": model,
-            "messages": [
-                {"role": "user", "content": PROMPTS[i % len(PROMPTS)]}
-            ],
+            "messages": [{"role": "user", "content": PROMPTS[i % len(PROMPTS)]}],
             "max_tokens": max_tokens,
         }
         for i in range(batch_size)
@@ -196,10 +189,18 @@ async def run_benchmark(args):
         print("Warming up...", end="", flush=True)
         for _ in range(args.warmup):
             await bench_batch(
-                client, args.base_url, model, 2, args.max_tokens,
+                client,
+                args.base_url,
+                model,
+                2,
+                args.max_tokens,
             )
             await bench_individual(
-                client, args.base_url, model, 2, args.max_tokens,
+                client,
+                args.base_url,
+                model,
+                2,
+                args.max_tokens,
             )
         print(" done\n")
 
@@ -222,12 +223,20 @@ async def run_benchmark(args):
 
             for _ in range(args.repeats):
                 bl = await bench_batch(
-                    client, args.base_url, model, bs, args.max_tokens,
+                    client,
+                    args.base_url,
+                    model,
+                    bs,
+                    args.max_tokens,
                 )
                 batch_latencies.append(bl)
 
                 il = await bench_individual(
-                    client, args.base_url, model, bs, args.max_tokens,
+                    client,
+                    args.base_url,
+                    model,
+                    bs,
+                    args.max_tokens,
                 )
                 indiv_latencies.append(il)
 
@@ -246,16 +255,18 @@ async def run_benchmark(args):
                 f"{indiv_rps:>11.1f}"
             )
 
-            all_results.append({
-                "batch_size": bs,
-                "batch_latency_ms": batch_median * 1000,
-                "individual_latency_ms": indiv_median * 1000,
-                "speedup": speedup,
-                "batch_req_per_sec": batch_rps,
-                "individual_req_per_sec": indiv_rps,
-                "batch_all_ms": [x * 1000 for x in batch_latencies],
-                "individual_all_ms": [x * 1000 for x in indiv_latencies],
-            })
+            all_results.append(
+                {
+                    "batch_size": bs,
+                    "batch_latency_ms": batch_median * 1000,
+                    "individual_latency_ms": indiv_median * 1000,
+                    "speedup": speedup,
+                    "batch_req_per_sec": batch_rps,
+                    "individual_req_per_sec": indiv_rps,
+                    "batch_all_ms": [x * 1000 for x in batch_latencies],
+                    "individual_all_ms": [x * 1000 for x in indiv_latencies],
+                }
+            )
 
         if args.output:
             out = {
@@ -320,16 +331,17 @@ def compare(file_a: str, file_b: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Benchmark batch chat completion endpoint"
-    )
+    parser = argparse.ArgumentParser(description="Benchmark batch chat completion endpoint")
     parser.add_argument(
-        "--base-url", default="http://localhost:8000",
+        "--base-url",
+        default="http://localhost:8000",
         help="vLLM server base URL",
     )
     parser.add_argument("--model", default=None, help="Model name (auto-detected if omitted)")
     parser.add_argument(
-        "--batch-sizes", nargs="+", type=int,
+        "--batch-sizes",
+        nargs="+",
+        type=int,
         default=[1, 2, 4, 8, 16, 32, 64],
     )
     parser.add_argument("--max-tokens", type=int, default=32)
@@ -337,7 +349,9 @@ def main():
     parser.add_argument("--repeats", type=int, default=10)
     parser.add_argument("--output", type=str, default=None, help="Save results to JSON")
     parser.add_argument(
-        "--compare", nargs=2, metavar=("BASE", "HEAD"),
+        "--compare",
+        nargs=2,
+        metavar=("BASE", "HEAD"),
         help="Compare two saved result files",
     )
     args = parser.parse_args()
