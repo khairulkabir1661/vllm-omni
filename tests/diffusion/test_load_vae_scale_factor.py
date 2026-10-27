@@ -3,7 +3,11 @@
 
 import json
 
+import pytest
+
 from vllm_omni.diffusion.models.utils import load_vae_scale_factor
+
+pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
 
 def _make_vae_config(tmp_path, data):
