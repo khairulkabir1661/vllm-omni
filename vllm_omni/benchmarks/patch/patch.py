@@ -598,14 +598,11 @@ def get_samples(args, tokenizer, **kwargs):
     # Diffusion generation models (not image-edits, which need input images
     # supplied by the existing dataset path).
     from vllm_omni.benchmarks.serve import (
-        _normalize_endpoint,
+        _is_image_edit_benchmark,
         is_diffusion_benchmark,
     )
 
-    endpoint = _normalize_endpoint(getattr(args, "endpoint", None)) or ""
-    backend = getattr(args, "backend", None) or ""
-    is_image_edit = endpoint == "/v1/images/edits" or backend == "openai-image-edits-omni"
-    if is_diffusion_benchmark(args) and not is_image_edit:
+    if is_diffusion_benchmark(args) and not _is_image_edit_benchmark(args):
         from vllm_omni.benchmarks.data_modules.diffusion_dataset import (
             load_diffusion_samples,
         )
