@@ -641,43 +641,27 @@ class RungeKutta4ODESolver:
             function_value_start,
         )
 
-    def _linear_interpolation(self, time_start, time_end, value_start, value_end, time_point):
-        if time_point == time_start:
-            return value_start
-        if time_point == time_end:
-            return value_end
-        weight = (time_point - time_start) / (time_end - time_start)
-        return value_start + weight * (value_end - value_start)
-
     def integrate(self, time_points):
-        solution = torch.empty(
-            len(time_points),
-            *self.initial_value.shape,
-            dtype=self.initial_value.dtype,
-            device=self.initial_value.device,
-        )
-        solution[0] = self.initial_value
+        """Integrate the ODE over ``time_points`` and return the final value.
 
-        current_index = 1
+        Only the last point's solution is produced (both call sites consume
+        ``[-1]``). The loop indexes with Python ints and never converts 0-dim
+        CUDA tensors to bool, so no implicit host synchronization happens and
+        the solve stays asynchronous / CUDA-graph-capturable.
+
+        Assumes ``time_points`` is non-decreasing (true for the linspace +
+        sway schedules used here, e.g. sway=-1 maps t to 1 - cos(pi/2 * t)).
+        """
         current_value = self.initial_value
-        for time_start, time_end in zip(time_points[:-1], time_points[1:]):
+        for j in range(len(time_points) - 1):
+            time_start = time_points[j]
+            time_end = time_points[j + 1]
             time_step = time_end - time_start
-            delta_value, _ = self._compute_step(self.function, time_start, time_step, time_end, current_value)
-            next_value = current_value + delta_value
-
-            while current_index < len(time_points) and time_end >= time_points[current_index]:
-                solution[current_index] = self._linear_interpolation(
-                    time_start,
-                    time_end,
-                    current_value,
-                    next_value,
-                    time_points[current_index],
-                )
-                current_index += 1
-
-            current_value = next_value
-
-        return solution
+            delta_value, _ = self._compute_step(
+                self.function, time_start, time_step, time_end, current_value
+            )
+            current_value = current_value + delta_value
+        return current_value
 
 
 @auto_docstring(
@@ -834,9 +818,8 @@ class Qwen2_5OmniToken2WavDiTModel(Qwen2_5OmniPreTrainedModel):
             time_embedding += sway_coefficient * (torch.cos(torch.pi / 2 * time_embedding) - 1 + time_embedding)
 
         ode_solver = RungeKutta4ODESolver(function=ode_function, initial_value=initial_state)
-        solution_trajectory = ode_solver.integrate(time_embedding)
+        generated_waveform = ode_solver.integrate(time_embedding)
 
-        generated_waveform = solution_trajectory[-1]
         generated_mel_spectrogram = generated_waveform.permute(0, 2, 1)
         return generated_mel_spectrogram
 
@@ -905,9 +888,8 @@ class Qwen2_5OmniToken2WavDiTModel(Qwen2_5OmniPreTrainedModel):
             time_embedding += sway_coefficient * (torch.cos(torch.pi / 2 * time_embedding) - 1 + time_embedding)
 
         ode_solver = RungeKutta4ODESolver(function=ode_function, initial_value=initial_state)
-        solution_trajectory = ode_solver.integrate(time_embedding)
+        generated_waveform = ode_solver.integrate(time_embedding)
 
-        generated_waveform = solution_trajectory[-1]
         generated_mel_spectrogram = generated_waveform.permute(0, 2, 1)
         return generated_mel_spectrogram
 
