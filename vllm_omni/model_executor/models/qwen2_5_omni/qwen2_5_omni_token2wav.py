@@ -39,6 +39,11 @@ from vllm_omni.model_executor.models.common.alias_free_activation import AliasFr
 from vllm_omni.model_executor.models.common.ecapa_tdnn import ECAPATimeDelayNet
 from vllm_omni.model_executor.models.common.snake_activation import SnakeBeta
 from vllm_omni.model_executor.models.qwen2_5_omni.audio_length import cap_and_align_mel_length, resolve_max_mel_frames
+from vllm_omni.model_executor.models.qwen2_5_omni.dit_solve_graph_wrapper import (
+    DiTSolveCUDAGraphWrapper,
+    dit_solve_cudagraph_enabled,
+    dit_solve_cudagraph_max_entries,
+)
 
 
 # Provide a no-op auto_docstring decorator to satisfy annotations if missing
@@ -657,11 +662,13 @@ class RungeKutta4ODESolver:
             time_start = time_points[j]
             time_end = time_points[j + 1]
             time_step = time_end - time_start
-            delta_value, _ = self._compute_step(
-                self.function, time_start, time_step, time_end, current_value
-            )
+            delta_value, _ = self._compute_step(self.function, time_start, time_step, time_end, current_value)
             current_value = current_value + delta_value
         return current_value
+
+
+def _integrate_rk4(function, initial_value, time_points):
+    return RungeKutta4ODESolver(function=function, initial_value=initial_value).integrate(time_points)
 
 
 @auto_docstring(
@@ -702,6 +709,89 @@ class Qwen2_5OmniToken2WavDiTModel(Qwen2_5OmniPreTrainedModel):
 
         self.norm_out = Qwen2_5_OmniAdaLayerNormZero_Final(config.hidden_size)  # final modulation
         self.proj_out = nn.Linear(config.hidden_size, config.mel_dim)
+
+        # Whole-solve CUDA graph cache (lazy capture per input shape); see
+        # dit_solve_graph_wrapper.py. Bit-exact vs the eager solve.
+        self._solve_graph_wrapper = None
+        if dit_solve_cudagraph_enabled():
+            self._solve_graph_wrapper = DiTSolveCUDAGraphWrapper(
+                build_ode_fn=self._build_ode_function,
+                integrate_fn=_integrate_rk4,
+                max_entries=dit_solve_cudagraph_max_entries(),
+            )
+
+    def _build_ode_function(
+        self,
+        conditioning_vector,
+        reference_mel,
+        quantized_code,
+        guidance_scale,
+        initial_state,
+    ):
+        """Build the CFG-guided ODE function over the given (static) inputs.
+
+        Shared by the eager solve and the CUDA-graph capture so both paths
+        run the identical kernels.
+        """
+        conditioning_vector = conditioning_vector.unsqueeze(1).repeat(1, initial_state.shape[1], 1)
+
+        def ode_function(time_step, hidden_states):
+            if guidance_scale < 1e-5:
+                prediction = self(
+                    hidden_states=hidden_states,
+                    speaker_embedding=conditioning_vector,
+                    condition_vector=reference_mel,
+                    quantized_code=quantized_code,
+                    time_step=time_step,
+                    drop_audio_conditioning=False,
+                    drop_code=False,
+                    apply_cfg=False,
+                )
+                return prediction
+
+            model_output = self(
+                hidden_states=hidden_states,
+                quantized_code=quantized_code,
+                speaker_embedding=conditioning_vector,
+                condition_vector=reference_mel,
+                time_step=time_step,
+                apply_cfg=True,
+            )
+            guided_prediction, null_prediction = torch.chunk(model_output, 2, dim=0)
+            return guided_prediction + (guided_prediction - null_prediction) * guidance_scale
+
+        return ode_function
+
+    def _solve_flow_matching(
+        self,
+        conditioning_vector,
+        reference_mel,
+        quantized_code,
+        initial_state,
+        time_embedding,
+        guidance_scale,
+    ):
+        """Integrate the flow-matching ODE to its final value.
+
+        Replays a captured whole-solve CUDA graph when one matches the input
+        shapes exactly; otherwise runs the eager solve.
+        """
+        wrapper = self._solve_graph_wrapper
+        if wrapper is not None:
+            output = wrapper.solve(
+                conditioning_vector,
+                reference_mel,
+                quantized_code,
+                initial_state,
+                time_embedding,
+                guidance_scale,
+            )
+            if output is not None:
+                return output
+        ode_function = self._build_ode_function(
+            conditioning_vector, reference_mel, quantized_code, guidance_scale, initial_state
+        )
+        return RungeKutta4ODESolver(function=ode_function, initial_value=initial_state).integrate(time_embedding)
 
     def forward(
         self,
@@ -775,35 +865,9 @@ class Qwen2_5OmniToken2WavDiTModel(Qwen2_5OmniPreTrainedModel):
             device=quantized_code.device,
         )
         batch_size = reference_mel_spectrogram.shape[0]
-        conditioning_vector = conditioning_vector.unsqueeze(1).repeat(1, target_duration, 1)
 
         if batch_size != 1:
             raise ValueError("Only batch size = 1 is currently supported")
-
-        def ode_function(time_step, hidden_states):
-            if guidance_scale < 1e-5:
-                prediction = self(
-                    hidden_states=hidden_states,
-                    speaker_embedding=conditioning_vector,
-                    condition_vector=reference_mel_spectrogram,
-                    quantized_code=quantized_code,
-                    time_step=time_step,
-                    drop_audio_conditioning=False,
-                    drop_code=False,
-                    apply_cfg=False,
-                )
-                return prediction
-
-            model_output = self(
-                hidden_states=hidden_states,
-                quantized_code=quantized_code,
-                speaker_embedding=conditioning_vector,
-                condition_vector=reference_mel_spectrogram,
-                time_step=time_step,
-                apply_cfg=True,
-            )
-            guided_prediction, null_prediction = torch.chunk(model_output, 2, dim=0)
-            return guided_prediction + (guided_prediction - null_prediction) * guidance_scale
 
         initial_time = 0
         time_embedding = torch.linspace(
@@ -811,14 +875,20 @@ class Qwen2_5OmniToken2WavDiTModel(Qwen2_5OmniPreTrainedModel):
             1,
             num_steps,
             device=quantized_code.device,
-            dtype=conditioning_vector.dtype,
+            dtype=reference_mel_spectrogram.dtype,
         )
 
         if sway_coefficient is not None:
             time_embedding += sway_coefficient * (torch.cos(torch.pi / 2 * time_embedding) - 1 + time_embedding)
 
-        ode_solver = RungeKutta4ODESolver(function=ode_function, initial_value=initial_state)
-        generated_waveform = ode_solver.integrate(time_embedding)
+        generated_waveform = self._solve_flow_matching(
+            conditioning_vector,
+            reference_mel_spectrogram,
+            quantized_code,
+            initial_state,
+            time_embedding,
+            guidance_scale,
+        )
 
         generated_mel_spectrogram = generated_waveform.permute(0, 2, 1)
         return generated_mel_spectrogram
@@ -846,34 +916,9 @@ class Qwen2_5OmniToken2WavDiTModel(Qwen2_5OmniPreTrainedModel):
         """
         initial_state = y0.to(quantized_code.device)
         batch_size = reference_mel_spectrogram.shape[0]
-        conditioning_vector = conditioning_vector.unsqueeze(1).repeat(1, initial_state.shape[1], 1)
 
         if batch_size != 1:
             raise ValueError("Only batch size = 1 is currently supported")
-
-        def ode_function(time_step, hidden_states):
-            if guidance_scale < 1e-5:
-                prediction = self(
-                    hidden_states=hidden_states,
-                    speaker_embedding=conditioning_vector,
-                    condition_vector=reference_mel_spectrogram,
-                    quantized_code=quantized_code,
-                    time_step=time_step,
-                    drop_audio_conditioning=False,
-                    drop_code=False,
-                )
-                return prediction
-
-            model_output = self(
-                hidden_states=hidden_states,
-                quantized_code=quantized_code,
-                speaker_embedding=conditioning_vector,
-                condition_vector=reference_mel_spectrogram,
-                time_step=time_step,
-                apply_cfg=True,
-            )
-            guided_prediction, null_prediction = torch.chunk(model_output, 2, dim=0)
-            return guided_prediction + (guided_prediction - null_prediction) * guidance_scale
 
         initial_time = 0
         time_embedding = torch.linspace(
@@ -881,14 +926,20 @@ class Qwen2_5OmniToken2WavDiTModel(Qwen2_5OmniPreTrainedModel):
             1,
             num_steps,
             device=quantized_code.device,
-            dtype=conditioning_vector.dtype,
+            dtype=initial_state.dtype,
         )
 
         if sway_coefficient is not None:
             time_embedding += sway_coefficient * (torch.cos(torch.pi / 2 * time_embedding) - 1 + time_embedding)
 
-        ode_solver = RungeKutta4ODESolver(function=ode_function, initial_value=initial_state)
-        generated_waveform = ode_solver.integrate(time_embedding)
+        generated_waveform = self._solve_flow_matching(
+            conditioning_vector,
+            reference_mel_spectrogram,
+            quantized_code,
+            initial_state,
+            time_embedding,
+            guidance_scale,
+        )
 
         generated_mel_spectrogram = generated_waveform.permute(0, 2, 1)
         return generated_mel_spectrogram
