@@ -75,7 +75,7 @@ def _validate_fail_fast_on_timeout(args: argparse.Namespace) -> None:
 def main(args: argparse.Namespace) -> dict[str, Any]:
     if getattr(args, "wer_eval", False):
         os.environ["WER_EVAL"] = "1"
-    if getattr(args, "save_eval_items", False) or getattr(args, "videomme_save_eval_items", False):
+    if getattr(args, "save_eval_items", False):
         os.environ["SAVE_EVAL_ITEMS"] = "1"
     request_timeout_s = getattr(args, "omni_request_timeout_s", None)
     if request_timeout_s is not None:

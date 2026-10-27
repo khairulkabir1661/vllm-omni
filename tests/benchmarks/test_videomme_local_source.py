@@ -261,40 +261,53 @@ def test_compute_videomme_accuracy_metrics_saves_eval_items() -> None:
 
 
 @pytest.mark.parametrize(
-    "save_eval_items,videomme_save_eval_items",
-    [(True, False), (False, True), (True, True)],
-    ids=["generic-flag", "videomme-flag", "both-flags"],
+    "argv",
+    [["--save-eval-items"], ["--videomme-save-eval-items"]],
+    ids=["generic-flag", "videomme-deprecated-alias"],
 )
 def test_save_eval_items_cli_sets_env(
     monkeypatch: pytest.MonkeyPatch,
-    save_eval_items: bool,
-    videomme_save_eval_items: bool,
+    argv: list[str],
 ) -> None:
+    from argparse import ArgumentParser
+
     from vllm_omni.benchmarks import serve
+    from vllm_omni.entrypoints.cli.benchmark.cli_args import (
+        add_eval_output_cli_args,
+        add_videomme_cli_args,
+    )
 
     seen: dict[str, str | None] = {}
 
     async def fake_main_async(args: Namespace) -> dict[str, str]:
         seen["env"] = os.environ.get("SAVE_EVAL_ITEMS")
+        seen["save_eval_items"] = getattr(args, "save_eval_items", None)
         return {"ok": "1"}
 
     monkeypatch.delenv("SAVE_EVAL_ITEMS", raising=False)
     monkeypatch.setattr(serve, "main_async", fake_main_async)
 
-    args = Namespace(
-        videomme_save_eval_items=videomme_save_eval_items,
-        wer_eval=False,
-        save_eval_items=save_eval_items,
-        omni_request_timeout_s=None,
-        endpoint=None,
-        backend="openai-chat-omni",
-        explicit_keys=frozenset(),
-        extra_body=None,
-        print_stage=False,
-        dataset_name="videomme",
-    )
+    parser = ArgumentParser()
+    add_videomme_cli_args(parser)
+    add_eval_output_cli_args(parser)
+    if argv == ["--videomme-save-eval-items"]:
+        with pytest.warns(FutureWarning, match="videomme-save-eval-items is deprecated"):
+            args = parser.parse_args(argv)
+    else:
+        args = parser.parse_args(argv)
+    assert args.save_eval_items is True
+
+    args.wer_eval = False
+    args.omni_request_timeout_s = None
+    args.endpoint = None
+    args.backend = "openai-chat-omni"
+    args.explicit_keys = frozenset()
+    args.extra_body = None
+    args.print_stage = False
+    args.dataset_name = "videomme"
     assert serve.main(args) == {"ok": "1"}
     assert seen["env"] == "1"
+    assert seen["save_eval_items"] is True
 
 
 def _file_uri_path(url: str) -> Path:

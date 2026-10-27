@@ -434,10 +434,10 @@ def add_videomme_cli_args(parser: argparse.ArgumentParser) -> None:
     )
     group.add_argument(
         "--videomme-save-eval-items",
-        action="store_true",
-        default=False,
-        help="Include per-request Video-MME accuracy rows in the saved JSON under "
-        "videomme_eval_items. Also enabled by --save-eval-items or env SAVE_EVAL_ITEMS=1.",
+        dest="save_eval_items",
+        action=_DeprecatedStoreTrue,
+        replacement="--save-eval-items",
+        help=argparse.SUPPRESS,
     )
 
 
@@ -495,6 +495,15 @@ def add_seed_tts_cli_args(parser: argparse.ArgumentParser) -> None:
         help="Override chat system message for --backend openai-chat-omni (Qwen3-Omni TTS). "
         "Default follows official Qwen3-Omni identity + zero-shot voice-clone instructions.",
     )
+
+
+def add_eval_output_cli_args(parser: argparse.ArgumentParser) -> None:
+    """Add shared evaluation-output arguments.
+
+    These span datasets (Seed-TTS / Daily-Omni / Video-MME), so they get their
+    own group rather than living under any single dataset's options.
+    """
+    group = parser.add_argument_group("Eval Output Options")
     group.add_argument(
         "--wer-eval",
         dest="wer_eval",
@@ -624,6 +633,7 @@ def add_omni_args(parser: argparse.ArgumentParser) -> None:
     add_omniinteract_cli_args(parser)
     add_duplex_eval_cli_args(parser)
     add_seed_tts_cli_args(parser)
+    add_eval_output_cli_args(parser)
     add_multi_stage_cli_args(parser)
     add_diffusion_cli_args(parser)
 
