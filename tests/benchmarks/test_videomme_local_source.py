@@ -310,6 +310,44 @@ def test_save_eval_items_cli_sets_env(
     assert seen["save_eval_items"] is True
 
 
+def test_eval_output_dataset_lists_are_valid_choices() -> None:
+    """The eval-output dataset lists must not drift from valid --dataset-name choices."""
+    from argparse import ArgumentParser
+
+    from vllm.benchmarks.serve import add_cli_args
+
+    from vllm_omni.entrypoints.cli.benchmark.cli_args import (
+        _SAVE_EVAL_ITEMS_DATASETS,
+        _WER_EVAL_DATASETS,
+        add_omni_args,
+        extend_omni_choices,
+    )
+
+    parser = ArgumentParser()
+    add_cli_args(parser)
+    add_omni_args(parser)
+    extend_omni_choices(parser)
+
+    dataset_choices: set[str] = set()
+    for action in parser._actions:
+        if action.dest == "dataset_name" and action.choices is not None:
+            dataset_choices.update(action.choices)
+
+    assert dataset_choices, "dataset_name choices not found on the serve parser"
+    assert _SAVE_EVAL_ITEMS_DATASETS <= dataset_choices
+    assert _WER_EVAL_DATASETS <= dataset_choices
+
+
+@pytest.mark.parametrize("flag", ["save_eval_items", "wer_eval"], ids=["save-eval-items", "wer-eval"])
+def test_eval_output_flags_warn_on_unsupported_dataset(flag: str) -> None:
+    """Eval-output flags warn (not error) when paired with an unsupported dataset."""
+    from vllm_omni.entrypoints.cli.benchmark.cli_args import preprocess_serve_args
+
+    args = Namespace(**{flag: True}, dataset_name="random")
+    with pytest.warns(UserWarning, match=f"{flag.replace('_', '-')} has no effect with dataset 'random'"):
+        preprocess_serve_args(args)
+
+
 def _file_uri_path(url: str) -> Path:
     parsed = urlparse(url)
     assert parsed.scheme == "file"

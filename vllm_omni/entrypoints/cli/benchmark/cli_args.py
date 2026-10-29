@@ -514,7 +514,8 @@ def add_eval_output_cli_args(parser: argparse.ArgumentParser) -> None:
         "zhaochenyang20/seed-tts-eval (Whisper-large-v3 / Paraformer-zh + jiwer). "
         "Sets WER_EVAL=1. Install: pip install 'vllm-omni[dev]'. "
         "Optional: SEED_TTS_EVAL_DEVICE, SEED_TTS_HF_WHISPER_MODEL. "
-        "Currently works only with Seed-TTS datasets.",
+        "Currently works only with Seed-TTS-family datasets "
+        "(seed-tts, seed-tts-text, seed-tts-design, ttsd, sound-effect).",
     )
     group.add_argument(
         "--save-eval-items",
@@ -644,7 +645,19 @@ _SAVE_EVAL_ITEMS_DATASETS = frozenset(
         "seed-tts",
         "seed-tts-text",
         "seed-tts-design",
+        "sound-effect",
+        "ttsd",
         "videomme",
+    }
+)
+
+_WER_EVAL_DATASETS = frozenset(
+    {
+        "seed-tts",
+        "seed-tts-text",
+        "seed-tts-design",
+        "sound-effect",
+        "ttsd",
     }
 )
 
@@ -656,6 +669,13 @@ def preprocess_serve_args(args: argparse.Namespace) -> None:
         warnings.warn(
             f"--save-eval-items has no effect with dataset {dataset!r}; "
             f"supported datasets: {', '.join(sorted(_SAVE_EVAL_ITEMS_DATASETS))}",
+            UserWarning,
+            stacklevel=2,
+        )
+    if getattr(args, "wer_eval", False) and dataset and dataset not in _WER_EVAL_DATASETS:
+        warnings.warn(
+            f"--wer-eval has no effect with dataset {dataset!r}; "
+            f"supported datasets: {', '.join(sorted(_WER_EVAL_DATASETS))}",
             UserWarning,
             stacklevel=2,
         )
