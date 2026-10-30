@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import defaultdict
 from typing import Any
 
 from fastapi import Request
@@ -30,7 +31,7 @@ from vllm.tokenizers.mistral import (
 from vllm.utils.async_utils import merge_async_iterators
 
 from vllm_omni.entrypoints.openai.serving_chat import OmniOpenAIServingChat
-from vllm_omni.entrypoints.openai.utils import is_single_stage_diffusion
+from vllm_omni.entrypoints.openai.utils import get_stage_type
 from vllm_omni.entrypoints.utils import coerce_param_message_types
 
 logger = init_logger(__name__)
@@ -85,8 +86,8 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
         then preprocesses each conversation individually.
 
         Returns:
-            (all_conversations, all_engine_prompts, single_requests) on
-            success, or ErrorResponse on failure.
+            (all_conversations, all_engine_prompts, single_requests,
+            all_entry_stage_ids) on success, or ErrorResponse on failure.
         """
         # --- Batch-level checks (run once for the whole batch) ---
 
@@ -100,19 +101,16 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
         if self.engine_client.errored:
             raise self.engine_client.dead_error
 
-        # Check 3: LoRA adapter
-        self._maybe_get_adapters(request, supports_default_mm_loras=True)
-
-        # Check 4: Tokenizer
+        # Check 3: Tokenizer
         renderer = self.renderer
         tokenizer = renderer.get_tokenizer()
         if tokenizer is None:
             tokenizer = await self.engine_client.get_tokenizer()
 
-        # Check 5: Tool parser class
+        # Check 4: Tool parser class
         tool_parser = self.parser_cls.tool_parser_cls if self.parser_cls is not None else None
 
-        # Check 6: Tool choice validation + tool_dicts
+        # Check 5: Tool choice validation + tool_dicts
         tool_choice = getattr(request, "tool_choice", None)
         tools = getattr(request, "tools", None)
         tool_parsing_unavailable = (
@@ -131,7 +129,7 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
         else:
             tool_dicts = [tool.model_dump() for tool in tools]
 
-        # Check 7: Chat template validation
+        # Check 6: Chat template validation
         if not self.use_harmony:
             error_check_ret = self.online_renderer.validate_chat_template(
                 request_chat_template=getattr(request, "chat_template", None),
@@ -141,7 +139,7 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
             if error_check_ret is not None:
                 return error_check_ret
 
-        # Check 8: Output modalities validation
+        # Check 7: Output modalities validation
         engine_output_modalities = [x for x in self.engine_client.output_modalities if x is not None]
         output_modalities = getattr(request, "modalities", engine_output_modalities)
         request.modalities = output_modalities if output_modalities is not None else engine_output_modalities
@@ -149,8 +147,6 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
         if not isinstance(request.modalities, list) or not all(isinstance(m, str) for m in request.modalities):
             return self.create_error_response("'modalities' must be a list of strings.")
         allowed_modalities = set(engine_output_modalities)
-        if is_single_stage_diffusion(self.engine_client):
-            allowed_modalities.add("text")
         unsupported = set(request.modalities) - allowed_modalities
         if unsupported:
             return self.create_error_response(
@@ -159,7 +155,7 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
                 f"{', '.join(sorted(allowed_modalities))}",
             )
 
-        # Check 9: Audio format validation
+        # Check 8: Audio format validation
         if request.modalities and "audio" in request.modalities:
             audio_format_check = self._resolve_audio_format(request)
             if isinstance(audio_format_check, ErrorResponse):
@@ -186,7 +182,12 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
 
         # --- Per-item preprocessing (concurrent) ---
 
-        async def _preprocess_item(single_request: ChatCompletionRequest) -> tuple[Any, Any]:
+        async def _preprocess_item(single_request: ChatCompletionRequest) -> tuple[Any, Any, int]:
+            # A request that bypasses stage 0 is rendered with the tokenizer
+            # and chat template of the stage it enters at (mirrors the
+            # single-request path).
+            entry_stage_id = self.engine_client.resolve_entry_stage_id(self._input_modalities(single_request.messages))
+            item_renderer = self.engine_client.get_stage_renderer(entry_stage_id) if entry_stage_id else renderer
             if not self.use_harmony:
                 merged_kwargs = self._effective_chat_template_kwargs(single_request)
                 conversation, engine_prompts = await self._preprocess_chat(
@@ -197,11 +198,12 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
                     default_template_kwargs=merged_kwargs,
                     tool_dicts=tool_dicts,
                     tool_parser=tool_parser,
-                    renderer=renderer,
+                    renderer=item_renderer,
                     add_generation_prompt=single_request.add_generation_prompt,
                     continue_final_message=single_request.continue_final_message,
                     documents=getattr(single_request, "documents", None),
                     add_special_tokens=single_request.add_special_tokens,
+                    entry_stage_id=entry_stage_id,
                 )
             else:
                 should_include_tools = tool_dicts is not None
@@ -209,7 +211,7 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
                     single_request,
                     should_include_tools,
                 )
-            return conversation, engine_prompts[0]
+            return conversation, engine_prompts[0], entry_stage_id
 
         try:
             results = await asyncio.gather(*[_preprocess_item(r) for r in single_requests])
@@ -222,16 +224,17 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
 
         all_conversations = [r[0] for r in results]
         all_engine_prompts = [r[1] for r in results]
+        all_entry_stage_ids = [r[2] for r in results]
 
-        return all_conversations, all_engine_prompts, single_requests
+        return all_conversations, all_engine_prompts, single_requests, all_entry_stage_ids
 
     @staticmethod
     def _count_output_tokens(omni_output: Any) -> tuple[int, int]:
         """Count (prompt, completion) tokens directly from an ``OmniRequestOutput``.
 
-        Text choices report usage via ``_create_text_choice``; audio, image,
-        and diffusion-text choices don't, so count from the request output
-        itself (mirrors the streaming path's final usage accounting).
+        Text choices report usage via ``_create_text_choice``; audio and
+        image choices don't, so count from the request output itself
+        (mirrors the streaming path's final usage accounting).
         """
         prompt_tokens = len(getattr(omni_output, "prompt_token_ids", None) or ())
         encoder_ids = getattr(omni_output, "encoder_prompt_token_ids", None)
@@ -262,10 +265,6 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
         grouped by prompt index.  Multi-modal choices are collapsed
         into one choice per conversation via ``_maybe_collapse_choices``.
         """
-        from collections import defaultdict
-
-        from vllm.entrypoints.openai.chat_completion.protocol import ChatMessage
-
         created_time = int(time.time())
 
         per_item_outputs: dict[int, list[Any]] = defaultdict(list)
@@ -298,6 +297,11 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
             else:
                 role = self.response_role
 
+            # Choice builders read chat-only fields (e.g. ``tools`` in the
+            # harmony parser) that ``BatchChatCompletionRequest`` does not
+            # carry, so pass the per-item request, not the batch request.
+            item_request = single_requests[prompt_idx] if single_requests is not None else request
+
             item_choices: list[ChatCompletionResponseChoice] = []
 
             for omni_output in outputs:
@@ -309,49 +313,30 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
                     continue
 
                 if output_type == "text":
-                    has_ar_output = getattr(omni_output, "stage_id", None) is not None or getattr(
-                        omni_output, "outputs", None
+                    conversation = all_conversations[prompt_idx]
+                    (
+                        choices_data,
+                        usage,
+                        _prompt_logprobs,
+                        _prompt_token_ids,
+                        _kv_transfer_params,
+                    ) = self._create_text_choice(
+                        item_request,
+                        omni_output,
+                        tokenizer,
+                        conversation,
+                        role,
+                        reasoning_parser,
                     )
-                    if has_ar_output:
-                        conversation = all_conversations[prompt_idx]
-                        (
-                            choices_data,
-                            usage,
-                            _prompt_logprobs,
-                            _prompt_token_ids,
-                            _kv_transfer_params,
-                        ) = self._create_text_choice(
-                            request,
-                            omni_output,
-                            tokenizer,
-                            conversation,
-                            role,
-                            reasoning_parser,
-                        )
-                        item_choices.extend(choices_data)
-                        total_prompt_tokens += usage.prompt_tokens
-                        total_completion_tokens += usage.completion_tokens
-                    else:
-                        text_body = self._get_diffusion_text_output(omni_output)
-                        message = ChatMessage(role=role, content=text_body)
-                        item_choices.append(
-                            ChatCompletionResponseChoice(
-                                index=0,
-                                message=message,
-                                logprobs=None,
-                                finish_reason="stop",
-                                stop_reason=None,
-                            )
-                        )
-                        p, c = self._count_output_tokens(omni_output)
-                        total_prompt_tokens += p
-                        total_completion_tokens += c
+                    item_choices.extend(choices_data)
+                    total_prompt_tokens += usage.prompt_tokens
+                    total_completion_tokens += usage.completion_tokens
 
                 elif output_type == "audio":
                     audio_choices = self._create_audio_choice(
                         omni_output,
                         role,
-                        request,
+                        item_request,
                         stream=False,
                     )
                     if isinstance(audio_choices, ErrorResponse):
@@ -365,7 +350,7 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
                     img_choices = self._create_image_choice(
                         omni_output,
                         role,
-                        request,
+                        item_request,
                         stream=False,
                     )
                     item_choices.extend(img_choices)
@@ -411,15 +396,20 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
 
         Validates the request once, preprocesses each conversation, submits
         each to the engine directly, and collects results into a single
-        response.  Falls back to the legacy path for diffusion models.
+        response.  Falls back to per-item fan-out for engines serving
+        diffusion (mirrors the dispatch in ``_create_chat_completion``).
         """
-        if is_single_stage_diffusion(self.engine_client):
-            return await self._create_batch_chat_completion_legacy(request, raw_request)
+        stage_configs = getattr(self.engine_client, "stage_configs", ()) or ()
+        serves_diffusion = self._diffusion_mode or any(
+            get_stage_type(stage_config) == "diffusion" for stage_config in stage_configs
+        )
+        if serves_diffusion:
+            return await self._create_batch_chat_completion_diffusion(request, raw_request)
 
         render_result = await self.render_batch_chat_request(request)
         if isinstance(render_result, ErrorResponse):
             return render_result
-        all_conversations, all_engine_prompts, single_requests = render_result
+        all_conversations, all_engine_prompts, single_requests, entry_stage_ids = render_result
 
         base_id = self._base_request_id(raw_request, request.request_id)
         request_id = f"chatcmpl-batch-{base_id}"
@@ -430,7 +420,13 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
         )
         model_name = self.models.model_name(lora_request)
 
+        # Mirror the single-request path: a request that bypasses stage 0 is
+        # tokenized with the entry stage's tokenizer.  Mixed batches with
+        # differing entry stages fall back to the stage-0 tokenizer.
         tokenizer = self.renderer.get_tokenizer()
+        entry0 = entry_stage_ids[0] if entry_stage_ids else 0
+        if entry0 and all(e == entry0 for e in entry_stage_ids):
+            tokenizer = self.engine_client.get_stage_renderer(entry0).get_tokenizer() or tokenizer
         if tokenizer is None:
             tokenizer = await self.engine_client.get_tokenizer()
 
@@ -493,12 +489,13 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
                     output_modalities=output_modalities,
                     arrival_time=request_timestamp,
                     lora_request=lora_request,
+                    entry_stage_id=entry_stage_ids[i],
                 )
                 generators.append(generator)
         except ValueError as e:
             return self.create_error_response(str(e))
 
-        return await self.chat_completion_full_generator_batch(
+        response = await self.chat_completion_full_generator_batch(
             request,
             generators,
             request_id,
@@ -509,13 +506,21 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
             reasoning_parser,
             single_requests=single_requests,
         )
+        return response
 
-    async def _create_batch_chat_completion_legacy(
+    async def _create_batch_chat_completion_diffusion(
         self,
         request: BatchChatCompletionRequest,
         raw_request: Request,
     ) -> ChatCompletionResponse | ErrorResponse:
-        """Legacy implementation: submits each item via create_chat_completion."""
+        """Fan-out path for engines serving diffusion.
+
+        Diffusion requests need the per-model generation dispatch in
+        ``create_chat_completion`` (diffusion mode uses a separate engine;
+        multistage hybrids need diffusion-aware prompt extraction and
+        sampling-param handling), so each item is submitted as a full chat
+        completion and the results are gathered.
+        """
         model = ""
         enabled_streaming = False
         chat_requests: list[ChatCompletionRequest] = []

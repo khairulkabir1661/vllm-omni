@@ -108,7 +108,7 @@ def test_subrequest_ids_are_unique(has_header: bool):
         messages=MSG_BATCH,
         seed=42,
     )
-    result = asyncio.run(handler._create_batch_chat_completion_legacy(request, _make_raw_request(headers)))
+    result = asyncio.run(handler._create_batch_chat_completion_diffusion(request, _make_raw_request(headers)))
     assert not isinstance(result, ErrorResponse)
     assert result.id.startswith("chatcmpl-batch")
 
@@ -173,6 +173,7 @@ def _make_render_handler():
     handler.engine_client = MagicMock()
     handler.engine_client.errored = False
     handler.engine_client.output_modalities = ["text"]
+    handler.engine_client.resolve_entry_stage_id = MagicMock(return_value=0)
     handler._maybe_get_adapters = MagicMock(return_value=None)
     handler.models = MagicMock()
     handler.models.model_name.return_value = "test-model"
@@ -212,13 +213,36 @@ def test_render_happy_path():
     handler = _make_render_handler()
     result = asyncio.run(handler.render_batch_chat_request(_make_batch_request(4)))
     assert not isinstance(result, ErrorResponse)
-    conversations, prompts, single_requests = result
+    conversations, prompts, single_requests, entry_stage_ids = result
     assert len(conversations) == 4
     assert len(prompts) == 4
     assert len(single_requests) == 4
+    assert entry_stage_ids == [0, 0, 0, 0]
     handler._check_model.assert_called_once()
     handler.online_renderer.validate_chat_template.assert_called_once()
     assert handler._preprocess_chat.call_count == 4
+
+
+def test_render_resolves_entry_stage_per_item():
+    """Items that bypass stage 0 must use the entry stage's renderer."""
+    handler = _make_render_handler()
+    handler.engine_client.resolve_entry_stage_id = MagicMock(side_effect=[1, 0])
+    stage_renderer = MagicMock()
+    handler.engine_client.get_stage_renderer = MagicMock(return_value=stage_renderer)
+
+    result = asyncio.run(handler.render_batch_chat_request(_make_batch_request(2)))
+    assert not isinstance(result, ErrorResponse)
+    _, _, _, entry_stage_ids = result
+    assert entry_stage_ids == [1, 0]
+
+    # Only the bypassing item resolves a stage renderer; that item's
+    # preprocess call carries the stage renderer and entry_stage_id.
+    handler.engine_client.get_stage_renderer.assert_called_once_with(1)
+    first_call = handler._preprocess_chat.call_args_list[0]
+    assert first_call.kwargs["renderer"] is stage_renderer
+    assert first_call.kwargs["entry_stage_id"] == 1
+    second_call = handler._preprocess_chat.call_args_list[1]
+    assert second_call.kwargs["entry_stage_id"] == 0
 
 
 def test_render_error_short_circuits():
@@ -342,7 +366,6 @@ def _make_generator_handler():
         ]
 
     handler._create_audio_choice = MagicMock(side_effect=fake_create_audio_choice)
-    handler._get_diffusion_text_output = MagicMock(return_value="diffusion text")
     handler._create_image_choice = MagicMock(return_value=[])
     return handler
 
@@ -442,6 +465,35 @@ def test_generator_batch_audio_only_usage_counted():
     assert result.usage.total_tokens == 22
 
 
+def test_generator_batch_uses_per_item_request_for_choices():
+    """Choice builders must get the per-item ChatCompletionRequest, not the
+    batch request (which lacks chat-only fields like ``tools``)."""
+    handler = _make_generator_handler()
+    generators = [
+        _async_gen(_make_text_omni_output("a")),
+        _async_gen(_make_text_omni_output("b")),
+    ]
+    request = _make_batch_request(2)
+    request.modalities = ["text"]
+    item_requests = [MagicMock() for _ in range(2)]
+    metadata = RequestResponseMetadata(request_id="batch-item-req")
+
+    asyncio.run(
+        handler.chat_completion_full_generator_batch(
+            request,
+            generators,
+            "batch-item-req",
+            "test-model",
+            [[{"role": "user", "content": "q"}]] * 2,
+            MagicMock(),
+            metadata,
+            single_requests=item_requests,
+        )
+    )
+    passed = [call.args[0] for call in handler._create_text_choice.call_args_list]
+    assert passed == item_requests
+
+
 def test_generator_batch_empty_generator_returns_error():
     handler = _make_generator_handler()
     generators = [
@@ -482,7 +534,7 @@ def _make_wiring_handler(n_items=2):
 
     async def _render_side_effect(req):
         req.modalities = ["text"]
-        return (conversations, engine_prompts, single_reqs)
+        return (conversations, engine_prompts, single_reqs, [0] * n_items)
 
     handler.render_batch_chat_request = AsyncMock(
         side_effect=_render_side_effect,
@@ -499,6 +551,7 @@ def _make_wiring_handler(n_items=2):
     )
 
     handler.engine_client = MagicMock()
+    handler.engine_client.stage_configs = [{"stage_type": "llm"}]
     handler.engine_client.generate = MagicMock(
         side_effect=lambda **kw: _async_gen(
             _make_text_omni_output("ok", prompt_tokens=5, completion_tokens=3),
@@ -540,3 +593,93 @@ def test_optimized_path_happy_path():
     call_args = handler.chat_completion_full_generator_batch.call_args
     passed_request_id = call_args[0][2]
     assert passed_request_id.startswith("chatcmpl-batch")
+
+
+def test_optimized_path_passes_entry_stage_to_generate():
+    """A homogeneous batch that bypasses stage 0 must submit at its entry stage."""
+    handler = _make_wiring_handler(2)
+    conversations = [[{"role": "user", "content": f"Q{i}"}] for i in range(2)]
+    single_reqs = [MagicMock() for _ in range(2)]
+
+    async def _render_side_effect(req):
+        req.modalities = ["text"]
+        return (conversations, [{"prompt_token_ids": [1]}] * 2, single_reqs, [1, 1])
+
+    handler.render_batch_chat_request = AsyncMock(side_effect=_render_side_effect)
+    stage_renderer = MagicMock()
+    stage_renderer.get_tokenizer.return_value = MagicMock()
+    handler.engine_client.get_stage_renderer = MagicMock(return_value=stage_renderer)
+
+    result = asyncio.run(handler.create_batch_chat_completion(_make_batch_request(2), _make_raw_request([])))
+    assert not isinstance(result, ErrorResponse)
+    for call in handler.engine_client.generate.call_args_list:
+        assert call.kwargs["entry_stage_id"] == 1
+    # The entry stage's tokenizer is used for response building.
+    handler.engine_client.get_stage_renderer.assert_called_with(1)
+
+
+# ---------------------------------------------------------------------------
+# Tests for diffusion dispatch in create_batch_chat_completion
+# ---------------------------------------------------------------------------
+
+
+def _make_dispatch_handler(stage_configs, diffusion_mode: bool = False):
+    """Build a handler whose only live parts are the dispatch targets."""
+    handler = OmniOpenAIServingChatBatch.__new__(OmniOpenAIServingChatBatch)
+    handler._diffusion_mode = diffusion_mode
+    handler.engine_client = MagicMock()
+    handler.engine_client.stage_configs = list(stage_configs)
+    handler.render_batch_chat_request = AsyncMock()
+    handler._create_batch_chat_completion_diffusion = AsyncMock(
+        return_value=ChatCompletionResponse(
+            model="test-model",
+            choices=[],
+            usage=UsageInfo(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+        ),
+    )
+    return handler
+
+
+@pytest.mark.parametrize(
+    "stage_configs",
+    [
+        ({"stage_type": "diffusion"},),  # single-stage diffusion
+        ({"stage_type": "llm"}, {"stage_type": "diffusion"}),  # hybrid AR + diffusion
+    ],
+)
+def test_diffusion_stages_route_to_fanout(stage_configs):
+    """Engines with any diffusion stage must use the per-item fan-out path."""
+    handler = _make_dispatch_handler(stage_configs)
+    asyncio.run(handler.create_batch_chat_completion(_make_batch_request(2), _make_raw_request([])))
+    handler._create_batch_chat_completion_diffusion.assert_called_once()
+    handler.render_batch_chat_request.assert_not_called()
+
+
+def test_diffusion_mode_routes_to_fanout():
+    """Diffusion mode has no AR engine client and must use the fan-out path."""
+    handler = _make_dispatch_handler((), diffusion_mode=True)
+    handler.engine_client = None
+    asyncio.run(handler.create_batch_chat_completion(_make_batch_request(2), _make_raw_request([])))
+    handler._create_batch_chat_completion_diffusion.assert_called_once()
+    handler.render_batch_chat_request.assert_not_called()
+
+
+def test_pure_ar_stages_route_to_optimized():
+    """Engines without diffusion stages must use the optimized path."""
+    handler = _make_dispatch_handler(({"stage_type": "llm"}, {"stage_type": "llm"}))
+    # Reuse the full wiring mocks so the optimized path can run to completion.
+    wired = _make_wiring_handler(2)
+    handler.render_batch_chat_request = wired.render_batch_chat_request
+    handler._maybe_get_adapters = wired._maybe_get_adapters
+    handler.models = wired.models
+    handler.renderer = wired.renderer
+    handler.parser_cls = wired.parser_cls
+    handler._log_inputs = wired._log_inputs
+    handler._build_sampling_params_list_from_request = wired._build_sampling_params_list_from_request
+    handler.engine_client = wired.engine_client
+    handler.engine_client.stage_configs = [{"stage_type": "llm"}, {"stage_type": "llm"}]
+    handler.chat_completion_full_generator_batch = wired.chat_completion_full_generator_batch
+
+    result = asyncio.run(handler.create_batch_chat_completion(_make_batch_request(2), _make_raw_request([])))
+    assert not isinstance(result, ErrorResponse)
+    handler.render_batch_chat_request.assert_called_once()
