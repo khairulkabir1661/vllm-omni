@@ -29,11 +29,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import io
 import json
 import statistics
 import time
 
 import httpx
+from PIL import Image
 
 PROMPTS = [
     "Explain what a neural network is in one sentence.",
@@ -112,15 +115,55 @@ async def detect_model(client: httpx.AsyncClient, base_url: str) -> str:
     return models[0]["id"]
 
 
+def make_image_urls(count: int, size: int) -> list[str]:
+    """Generate distinct JPEG data URLs.
+
+    Distinct images reduce (but do not eliminate) server-side multimodal
+    cache hits: images are cycled across warmup, repeats, and both endpoints,
+    so raise ``--num-images`` to cover the full request count if absolute
+    preprocess timings are needed.  Batch-vs-individual speedup ratios are
+    unaffected because both modes cycle the same set.
+    """
+    urls: list[str] = []
+    for i in range(count):
+        channels = [Image.effect_noise((size, size), sigma=40.0 + 10.0 * ((i + k) % 7)) for k in range(3)]
+        img = Image.merge("RGB", channels)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        urls.append("data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode())
+    return urls
+
+
+def build_message(prompt: str, image_url: str | None) -> list[dict]:
+    if image_url is None:
+        return [{"role": "user", "content": prompt}]
+    return [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": image_url}},
+                {"type": "text", "text": prompt},
+            ],
+        }
+    ]
+
+
 async def bench_batch(
     client: httpx.AsyncClient,
     base_url: str,
     model: str,
     batch_size: int,
     max_tokens: int,
+    image_urls: list[str] | None = None,
 ) -> float:
     """Send one batch request with batch_size messages. Return latency in seconds."""
-    messages = [[{"role": "user", "content": PROMPTS[i % len(PROMPTS)]}] for i in range(batch_size)]
+    messages = [
+        build_message(
+            PROMPTS[i % len(PROMPTS)],
+            image_urls[i % len(image_urls)] if image_urls else None,
+        )
+        for i in range(batch_size)
+    ]
     payload = {
         "model": model,
         "messages": messages,
@@ -146,12 +189,16 @@ async def bench_individual(
     model: str,
     batch_size: int,
     max_tokens: int,
+    image_urls: list[str] | None = None,
 ) -> float:
     """Send batch_size individual requests concurrently. Return total latency."""
     payloads = [
         {
             "model": model,
-            "messages": [{"role": "user", "content": PROMPTS[i % len(PROMPTS)]}],
+            "messages": build_message(
+                PROMPTS[i % len(PROMPTS)],
+                image_urls[i % len(image_urls)] if image_urls else None,
+            ),
             "max_tokens": max_tokens,
         }
         for i in range(batch_size)
@@ -174,6 +221,11 @@ async def bench_individual(
 
 
 async def run_benchmark(args):
+    image_urls: list[str] | None = None
+    if args.image_mode:
+        image_urls = make_image_urls(args.num_images, args.image_size)
+        print(f"Image mode: {args.num_images} distinct {args.image_size}x{args.image_size} JPEGs")
+
     async with httpx.AsyncClient() as client:
         model = args.model
         if not model:
@@ -194,6 +246,7 @@ async def run_benchmark(args):
                 model,
                 2,
                 args.max_tokens,
+                image_urls,
             )
             await bench_individual(
                 client,
@@ -201,6 +254,7 @@ async def run_benchmark(args):
                 model,
                 2,
                 args.max_tokens,
+                image_urls,
             )
         print(" done\n")
 
@@ -228,6 +282,7 @@ async def run_benchmark(args):
                     model,
                     bs,
                     args.max_tokens,
+                    image_urls,
                 )
                 batch_latencies.append(bl)
 
@@ -237,6 +292,7 @@ async def run_benchmark(args):
                     model,
                     bs,
                     args.max_tokens,
+                    image_urls,
                 )
                 indiv_latencies.append(il)
 
@@ -275,6 +331,7 @@ async def run_benchmark(args):
                 "max_tokens": args.max_tokens,
                 "warmup": args.warmup,
                 "repeats": args.repeats,
+                "image_mode": args.image_mode,
                 "results": all_results,
             }
             with open(args.output, "w") as f:
@@ -347,6 +404,18 @@ def main():
     parser.add_argument("--max-tokens", type=int, default=32)
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--repeats", type=int, default=10)
+    parser.add_argument(
+        "--image-mode",
+        action="store_true",
+        help="Send image+text multimodal messages (distinct generated JPEGs) instead of text-only",
+    )
+    parser.add_argument("--image-size", type=int, default=512, help="Generated image size (image mode)")
+    parser.add_argument(
+        "--num-images",
+        type=int,
+        default=8,
+        help="Number of distinct images to cycle through (image mode); raise to reduce MM-cache hits across iterations",
+    )
     parser.add_argument("--output", type=str, default=None, help="Save results to JSON")
     parser.add_argument(
         "--compare",

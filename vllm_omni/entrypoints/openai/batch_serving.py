@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from collections import defaultdict
 from typing import Any
@@ -35,6 +36,10 @@ from vllm_omni.entrypoints.openai.utils import get_stage_type
 from vllm_omni.entrypoints.utils import coerce_param_message_types
 
 logger = init_logger(__name__)
+
+# Profiling aid for benchmarks/batch_chat_completion_bench.py: logs per-batch
+# render/submit/collect phase timings when enabled.
+_BENCH_PHASE_LOG = os.environ.get("VLLM_OMNI_BENCH_PHASE_LOG", "").lower() in ("1", "true", "yes")
 
 
 class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
@@ -406,6 +411,7 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
         if serves_diffusion:
             return await self._create_batch_chat_completion_diffusion(request, raw_request)
 
+        _t_render0 = time.perf_counter()
         render_result = await self.render_batch_chat_request(request)
         if isinstance(render_result, ErrorResponse):
             return render_result
@@ -456,6 +462,7 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
                 )
             )
 
+        _t_render1 = time.perf_counter()
         generators = []
         try:
             for i, engine_prompt in enumerate(all_engine_prompts):
@@ -495,6 +502,7 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
         except ValueError as e:
             return self.create_error_response(str(e))
 
+        _t_submit1 = time.perf_counter()
         response = await self.chat_completion_full_generator_batch(
             request,
             generators,
@@ -506,6 +514,14 @@ class OmniOpenAIServingChatBatch(OmniOpenAIServingChat):
             reasoning_parser,
             single_requests=single_requests,
         )
+        if _BENCH_PHASE_LOG:
+            logger.info(
+                "[BENCH-PHASE] batch n=%d render=%.1fms submit=%.1fms collect=%.1fms",
+                len(all_engine_prompts),
+                (_t_render1 - _t_render0) * 1000,
+                (_t_submit1 - _t_render1) * 1000,
+                (time.perf_counter() - _t_submit1) * 1000,
+            )
         return response
 
     async def _create_batch_chat_completion_diffusion(
