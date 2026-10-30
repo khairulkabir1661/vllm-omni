@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 import zipfile
 from argparse import Namespace
 from pathlib import Path
@@ -329,6 +330,8 @@ def test_eval_output_dataset_lists_are_valid_choices() -> None:
     extend_omni_choices(parser)
 
     dataset_choices: set[str] = set()
+    # ``parser._actions`` is private argparse API — the standard way to reach
+    # a registered action's choices; revisit if argparse internals change.
     for action in parser._actions:
         if action.dest == "dataset_name" and action.choices is not None:
             dataset_choices.update(action.choices)
@@ -345,6 +348,26 @@ def test_eval_output_flags_warn_on_unsupported_dataset(flag: str) -> None:
 
     args = Namespace(**{flag: True}, dataset_name="random")
     with pytest.warns(UserWarning, match=f"{flag.replace('_', '-')} has no effect with dataset 'random'"):
+        preprocess_serve_args(args)
+
+
+@pytest.mark.parametrize("dataset", ["ttsd", "sound-effect"])
+def test_save_eval_items_warns_on_seed_tts_family_without_wer_eval(dataset: str) -> None:
+    """Seed-TTS-family per-item rows come from the --wer-eval pipeline; warn when it is missing."""
+    from vllm_omni.entrypoints.cli.benchmark.cli_args import preprocess_serve_args
+
+    args = Namespace(save_eval_items=True, wer_eval=False, dataset_name=dataset)
+    with pytest.warns(UserWarning, match="pass --wer-eval as well"):
+        preprocess_serve_args(args)
+
+
+@pytest.mark.parametrize("dataset", ["ttsd", "sound-effect"])
+def test_save_eval_items_does_not_warn_with_wer_eval(dataset: str) -> None:
+    from vllm_omni.entrypoints.cli.benchmark.cli_args import preprocess_serve_args
+
+    args = Namespace(save_eval_items=True, wer_eval=True, dataset_name=dataset)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
         preprocess_serve_args(args)
 
 

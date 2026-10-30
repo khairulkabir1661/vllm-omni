@@ -524,7 +524,9 @@ def add_eval_output_cli_args(parser: argparse.ArgumentParser) -> None:
         default=False,
         help="Include per-item evaluation rows in the saved JSON (key depends on dataset: "
         "seed_tts_wer_eval_items for WER, daily_omni_eval_items for Daily-Omni, "
-        "videomme_eval_items for Video-MME). Also controllable via env var SAVE_EVAL_ITEMS=1.",
+        "videomme_eval_items for Video-MME). Also controllable via env var SAVE_EVAL_ITEMS=1. "
+        "For Seed-TTS-family datasets, per-item rows are produced by the --wer-eval "
+        "pipeline, so pair this flag with --wer-eval.",
     )
     # Deprecated aliases — removed after v0.34
     group.add_argument(
@@ -676,6 +678,19 @@ def preprocess_serve_args(args: argparse.Namespace) -> None:
         warnings.warn(
             f"--wer-eval has no effect with dataset {dataset!r}; "
             f"supported datasets: {', '.join(sorted(_WER_EVAL_DATASETS))}",
+            UserWarning,
+            stacklevel=2,
+        )
+    elif (
+        getattr(args, "save_eval_items", False)
+        and dataset in _WER_EVAL_DATASETS
+        and not getattr(args, "wer_eval", False)
+    ):
+        # Per-item rows for Seed-TTS-family datasets are written by the WER
+        # eval pipeline, which only runs with --wer-eval.
+        warnings.warn(
+            f"--save-eval-items writes per-item rows for dataset {dataset!r} via the "
+            "--wer-eval pipeline; pass --wer-eval as well or no items will be saved",
             UserWarning,
             stacklevel=2,
         )
