@@ -19,7 +19,7 @@ import os
 from collections.abc import Mapping, Sequence
 from typing import NamedTuple
 
-from vllm_omni.metrics.utils import resolve_int_by_sequential_keys
+from vllm_omni.sample_rate import ALL_SAMPLE_RATE_KEYS, find_sample_rate
 
 # vllm_omni: namespace for omni-specific Prometheus families, distinct from
 # the upstream vllm:* families.
@@ -437,7 +437,9 @@ def compute_audio_frames(
 # ============================================================================
 # Audio sample-rate resolution
 # ============================================================================
-_SAMPLE_RATE_KEYS = ("output_sample_rate", "audio_sample_rate", "sample_rate", "sampling_rate", "sr")
+# Single source of truth: vllm_omni.sample_rate owns the key chain and the
+# coercion rules. Kept as a module attribute for backwards compatibility.
+_SAMPLE_RATE_KEYS = ALL_SAMPLE_RATE_KEYS
 
 
 def resolve_audio_sample_rate_or_none(
@@ -451,14 +453,13 @@ def resolve_audio_sample_rate_or_none(
     - an object exposing the same fields as attributes
     - a Sequence of the above (``str`` / ``bytes`` excluded); the first
       positive rate found across items wins
+
+    Delegates to :func:`vllm_omni.sample_rate.find_sample_rate` (the shared
+    lenient scan). Emits no deprecation warnings — config schemas legitimately
+    use these key names as field names; the deprecation contract covers model
+    output payloads read via ``vllm_omni.sample_rate.get_sampling_rate``.
     """
-    if isinstance(source, Sequence) and not isinstance(source, (str, bytes, bytearray)):
-        for item in source:
-            rate = resolve_int_by_sequential_keys(item, _SAMPLE_RATE_KEYS)
-            if rate is not None:
-                return rate
-        return None
-    return resolve_int_by_sequential_keys(source, _SAMPLE_RATE_KEYS)
+    return find_sample_rate(source)
 
 
 def resolve_audio_sample_rate(
